@@ -300,7 +300,7 @@ void RoamingWiFiManager::init(std::vector<KnownNetworkCredentials> credentials, 
 
     if (!WiFi.isConnected()) {
         if (fastPathUsed) {
-            DBG_PRINTLN_L(2,"WiFi: Performing initial scan...");
+            DBG_PRINTLN_L(2,"WiFi: Performing full initial scan...");
         } else {
             DBG_PRINTLN_L(2,"WiFi: No saved connection info; performing initial scan...");
         }
@@ -365,6 +365,13 @@ void RoamingWiFiManager::handleWiFiEvent(WiFiEvent_t event, arduino_event_info_t
     if (event == 115) { // ARDUINO_EVENT_WIFI_STA_GOT_IP
         wifiConnectedTime = millis();
         persistConnectedNetwork();
+
+        // Remember the client IP that was assigned so it can be referenced later.
+        const IPAddress ip = WiFi.localIP();
+        const String ipStr = ip.toString();
+        if (ipStr.length() > 0 && ipStr != "0.0.0.0") {
+            _clientIpAddresses.push_back(ipStr);
+        }
     }
 }
 
@@ -470,7 +477,7 @@ void RoamingWiFiManager::copyScannedNetworksToList(bool keepExisting) {
             // Even if it is not detected in this scan result, it is still considered "scanned".
             existing.scanned = true;
             existing.detected = false;
-            existing.rssi = -1000;
+            //existing.rssi = -1000;
             existing.known = isKnownSsid(existing.ssid);
         }
 
@@ -552,6 +559,14 @@ JsonDocument RoamingWiFiManager::getScannedNetworksAsJsonDocument() {
         network["scanned"] = net.scanned;
         network["detected"] = net.detected;
         network["known"] = net.known;
+    }
+
+    // Expose previously assigned client IP addresses for UI display.
+    JsonArray clientIps = doc["clientIps"].to<JsonArray>();
+    for (const auto& ip : _clientIpAddresses) {
+        if (!ip.isEmpty()) {
+            clientIps.add(ip);
+        }
     }
     return doc;
 }
@@ -635,8 +650,7 @@ void RoamingWiFiManager::printNetworks() {
 // Returns a ScannedNetwork struct if a suitable network is found
 // If no network is found, an empty struct is returned.
 ScannedNetwork RoamingWiFiManager::findBestNetworkVar() {
-    int bestRSSI = -100;
-    int bestKnownIndex = -1;
+    int bestRSSI = -1000;
     String bestSSID = "";
     
     ScannedNetwork bestNetworkVar;
@@ -645,18 +659,17 @@ ScannedNetwork RoamingWiFiManager::findBestNetworkVar() {
     for (const auto& net : scannedNetworkList) {
         String scannedSSID = net.ssid;
         int rssi = net.rssi;
+        if (!net.detected) {
+            continue; // Skip networks not detected in the last scan
+        }
+        if (!net.known) {
+            continue; // Skip unknown networks
+        }
         
-        // Check if this is a known network
-        for (int j = 0; j < knownNetworks.size(); j++) {
-            if (scannedSSID.equals(knownNetworks[j].ssid)) {
-                if (rssi > bestRSSI) {
-                    bestRSSI = rssi;
-                    bestKnownIndex = j;
-                    bestSSID = scannedSSID;
-                    bestNetworkVar = net;
-                }
-                break;
-            }
+        if (rssi > bestRSSI) {
+            bestRSSI = rssi;
+            bestSSID = scannedSSID;
+            bestNetworkVar = net;
         }
     }
     return bestNetworkVar;    
@@ -851,7 +864,7 @@ void RoamingWiFiManager::setupStatusEndpoints() {
     // WiFi status endpoint
     server.on("/wifi/status", HTTP_GET, [this](AsyncWebServerRequest *request) {
         if (!checkHttpAuth(request)) return;
-        DBG_PRINTLN_L(4,"/wifi/status requested");
+        DBG_PRINTLN_L(5,"/wifi/status requested");
         request->send(200, "application/json", getWiFiStatus());
     });
 }
@@ -941,7 +954,7 @@ void RoamingWiFiManager::setupScanEndpoints() {
     // Get networks endpoint
     server.on("/wifi/networks", HTTP_GET, [this](AsyncWebServerRequest *request) {
         if (!checkHttpAuth(request)) return;
-        DBG_PRINTLN_L(4,"/wifi/networks requested");
+        DBG_PRINTLN_L(5,"/wifi/networks requested");
         String s = getScannedNetworksAsJsonDocument().as<String>();
         request->send(200, "application/json", s);
     });
@@ -1722,17 +1735,17 @@ bool RoamingWiFiManager::handleAutoReconnect() {
     lastAutoReconnectAttemptTime = millis();
     autoReconnectAttemptCount++;
 
-    DBG_PRINTF_L(2,"WiFi: Auto-reconnect attempt %u (threshold %u)\n", autoReconnectAttemptCount, autoReconnectResetThreshold);
+    DBG_PRINTF_L(2,"WiFi: Auto-reconnect attempt %u (of %u)\n", autoReconnectAttemptCount, autoReconnectResetThreshold);
     // if attempting autoreconnect too many times, reset WiFi STA
     if (autoReconnectAttemptCount > autoReconnectResetThreshold) {
         autoReconnectAttemptCount = 0;
         resetWiFiSta();
-        return true;
     } else {
         connectToStrongestNetwork();
-        lastConnectAttemptTime = millis();
-        return true;
     }
+    lastConnectAttemptTime = millis();
+    lastAutoReconnectAttemptTime = millis();
+    return true;
 }
 
 bool RoamingWiFiManager::handleAutomaticScanning() {
@@ -1792,7 +1805,7 @@ bool RoamingWiFiManager::handleAsyncScanCompletion() {
                 if (autoRescanIndex < scannedNetworkList.size()) {
                     scannedNetworkList[autoRescanIndex].scanned = true;
                     scannedNetworkList[autoRescanIndex].detected = false;
-                    scannedNetworkList[autoRescanIndex].rssi = -1000;
+                    //scannedNetworkList[autoRescanIndex].rssi = -1000;
                     lastNetworksScanTime = millis();
                     lastNetworksScanType = "rescan";
                 }
@@ -1814,7 +1827,7 @@ bool RoamingWiFiManager::handleAsyncScanCompletion() {
                 if (autoRescanIndex < scannedNetworkList.size()) {
                     scannedNetworkList[autoRescanIndex].scanned = true;
                     scannedNetworkList[autoRescanIndex].detected = false;
-                    scannedNetworkList[autoRescanIndex].rssi = -1000;
+                    //scannedNetworkList[autoRescanIndex].rssi = -1000;
                     lastNetworksScanTime = millis();
                     lastNetworksScanType = "rescan";
                 }
@@ -1840,7 +1853,7 @@ bool RoamingWiFiManager::handleAsyncScanCompletion() {
             if (autoRescanIndex < scannedNetworkList.size()) {
                 scannedNetworkList[autoRescanIndex].scanned = true;
                 scannedNetworkList[autoRescanIndex].detected = false;
-                scannedNetworkList[autoRescanIndex].rssi = -1000;
+                //scannedNetworkList[autoRescanIndex].rssi = -1000;
             }
             autoRescanIndex++;
             startAutoRescanNext(autoRescanKnownOnly);

@@ -63,6 +63,10 @@ const String html = R"MyString(
         .signal-controls { display: flex; align-items: center; gap: 10px; margin-top: 6px; color: #b9bec7; }
         .signal-controls input.settings-number { width: 80px; }
         .known-list { margin-top: 10px; color: #b9bec7; }
+        .client-ip-list { margin-top: 14px; padding: 10px; background: #1d212b; border: 1px solid #2a2f3a; border-radius: 5px; }
+        .client-ip-list h3 { margin: 0 0 8px 0; font-size: 16px; }
+        .client-ip-list ul { margin: 0 0 0 18px; padding: 0; }
+        .client-ip-list li { margin: 2px 0; }
     </style>
 </head>
 <body>
@@ -1005,6 +1009,7 @@ const String html = R"MyString(
 
         // Sorting state (default: no sorting, preserve original order)
         let networksData = [];
+        let clientIps = [];
         let sortKey = null;
         let sortAsc = true;
 
@@ -1042,8 +1047,11 @@ const String html = R"MyString(
 
         function renderNetworksTable() {
             const networksDiv = document.getElementById('networks');
+            if (!networksDiv) return;
+
+            const ipsHtml = renderClientIpList();
             if (!networksData || networksData.length === 0) {
-                networksDiv.innerHTML = '<div>No networks found</div>';
+                networksDiv.innerHTML = `<div>No networks found</div>${ipsHtml}`;
                 return;
             }
             const rowsWithAlias = (networksData || []).map(n => ({
@@ -1096,7 +1104,16 @@ const String html = R"MyString(
                         }).join('')}
                     </tbody>
                 </table>
-                `;
+                ${ipsHtml}`;
+        }
+
+        function renderClientIpList() {
+            const ips = Array.isArray(clientIps) ? clientIps : [];
+            if (!ips.length) {
+                return '<div class="client-ip-list"><h3>Client IPs</h3><div class="info-line">No client IPs recorded yet.</div></div>';
+            }
+            const items = ips.map(ip => `<li>${ip}</li>`).join('');
+            return `<div class="client-ip-list"><h3>Client IPs</h3><ul>${items}</ul></div>`;
         }
 
         function getNetworks() {
@@ -1107,6 +1124,7 @@ const String html = R"MyString(
                     setNetworksScanAgeFromServer(data.scanAgeSec);
                     setNetworksScanCountFromServer(data.scanCount);
                     setNetworksScanTypeFromServer(data.scanType);
+                    clientIps = (data && Array.isArray(data.clientIps)) ? data.clientIps : [];
                     networksData = (data && Array.isArray(data.networks)) ? data.networks : [];
                     // Reset to default: no sorting, keep original order each fetch
                     sortKey = null;

@@ -27,7 +27,6 @@ public:
     }
 };
 
-
 class RoamingWiFiManager {
     public:
         // Reads MAC address from wifi chip and prints it to Serial. Also sets mode to STA and 5GHz.
@@ -85,6 +84,7 @@ class RoamingWiFiManager {
         // timestamps are all in ms
         std::vector<KnownNetworkCredentials> knownNetworks; // known networks to try connecting to
         std::vector<ScannedNetwork> scannedNetworkList; // scanned networks from last scan
+        std::vector<String> _clientIpAddresses; // list of assigned IP addresses, to help finding the unknown client IP for a specific network
 
         String _adminUser;
         String _adminPassword;
