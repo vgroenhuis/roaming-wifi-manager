@@ -1,8 +1,6 @@
 #pragma once
-#include <String.h>
 
-const String WIFI_HTML = 
-R"MyString(<!DOCTYPE html>
+const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
 <html lang="en">
 <head>
     <title>Roaming WiFi Manager</title>
@@ -166,6 +164,9 @@ R"MyString(<!DOCTYPE html>
     </div>
 
     <script>
+        try {
+        console.log('[WiFiPage] Script execution started');
+        
         // Track current connection for highlighting
         let currentBSSID = null;
         let currentChannel = null;
@@ -223,6 +224,7 @@ R"MyString(<!DOCTYPE html>
         }
 
         function fetchBssidAliasesIfConfigured() {
+            console.log('[WiFiPage] fetchBssidAliasesIfConfigured called');
             if (!bssidAliasesUrl) return;
             if (bssidAliasesFetchInFlight) return;
 
@@ -1211,7 +1213,9 @@ R"MyString(<!DOCTYPE html>
             if (toggle) toggle.checked = !!enabled;
         }
 
+        console.log('[WiFiPage] Defining updateAutoScanSetting function');
         function updateAutoScanSetting() {
+            console.log('[WiFiPage] updateAutoScanSetting called');
             const fullToggle = document.getElementById('autoFullScanToggle');
             const fullInput = document.getElementById('autoFullScanInterval');
             const rescanToggle = document.getElementById('autoRescanKnownToggle');
@@ -1258,7 +1262,9 @@ R"MyString(<!DOCTYPE html>
             });
         }
 
+        console.log('[WiFiPage] Defining updateAutoScanToggle function');
         function updateAutoScanToggle() {
+            console.log('[WiFiPage] updateAutoScanToggle called');
             authenticatedFetch('/wifi/settings')
                 .then(response => response.json())
                 .then(data => {
@@ -1315,7 +1321,9 @@ R"MyString(<!DOCTYPE html>
 
 
         // Load persisted graph settings from localStorage
+        console.log('[WiFiPage] Defining loadGraphSettings function');
         function loadGraphSettings() {
+            console.log('[WiFiPage] loadGraphSettings called');
             try {
                 const storedPlotKnown = localStorage.getItem(STORAGE_KEY_PLOT_KNOWN);
                 if (storedPlotKnown !== null) {
@@ -1336,9 +1344,21 @@ R"MyString(<!DOCTYPE html>
         }
 
         // Initial load
-        loadGraphSettings();
-        updateAutoScanToggle();
-        refreshStatusAndNetworks();
+        console.log('[WiFiPage] Starting initialization sequence');
+        try {
+            console.log('[WiFiPage] Calling loadGraphSettings()');
+            loadGraphSettings();
+            console.log('[WiFiPage] Calling updateAutoScanToggle()');
+            updateAutoScanToggle();
+            console.log('[WiFiPage] Calling refreshStatusAndNetworks()');
+            refreshStatusAndNetworks();
+            console.log('[WiFiPage] Initialization complete');
+        } catch (error) {
+            console.error('[WiFiPage] Initialization error:', error);
+        }
+        } catch (scriptError) {
+            console.error('[WiFiPage] FATAL: Script parsing/execution error:', scriptError);
+        }
     </script>
 </body>
 </html>

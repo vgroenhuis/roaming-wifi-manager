@@ -190,7 +190,6 @@ class RoamingWiFiManager {
         bool startAutoRescanNext(bool knownOnly);
 
         String getPasswordOfNetwork(String ssid); // returns empty string if ssid not found in list of known networks
-        String serverHtml();
         JsonDocument getScannedNetworksAsJsonDocument();
 
         bool isKnownSsid(const String& ssid);

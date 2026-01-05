@@ -17,8 +17,11 @@
 #define LED(R, G, B) if (RoamingWiFiManager::useLEDIndicator) { rgbLedWrite(RGB_BUILTIN, R, G, B); }
 #endif
 
-
-int RoamingWiFiManager::debugLevel = 0;
+#ifdef WIFI_DEBUG_LEVEL
+int RoamingWiFiManager::debugLevel = WIFI_DEBUG_LEVEL;
+#else
+int RoamingWiFiManager::debugLevel = 1;
+#endif
 
 String RoamingWiFiManager::toString(ScanPurpose purpose) {
     switch (purpose) {
@@ -155,6 +158,13 @@ void RoamingWiFiManager::loadDebugLevel() {
     if (!wifiPrefs.isKey("debugLevel")) wifiPrefs.putInt("debugLevel", 0);
     int level = wifiPrefs.getInt("debugLevel", 0);
     debugLevel = (level >= 0 && level <= 5) ? level : 0;
+#ifdef WIFI_DEBUG_LEVEL
+    if (debugLevel < WIFI_DEBUG_LEVEL) {
+        debugLevel = WIFI_DEBUG_LEVEL;
+        DBG_PRINTF_L(0, "WiFi: Debug level forced to %d by compile-time macro WIFI_DEBUG_LEVEL.\n", debugLevel);
+    }
+#endif
+    DBG_PRINTF_L(0, "WiFi: Debug level set to %d\n", debugLevel);
 }
 
 void RoamingWiFiManager::loadNetworkInfo() {
@@ -394,7 +404,7 @@ bool RoamingWiFiManager::connectDirectSaved() {
     } else {
         if (WiFi.status() == WL_CONNECTED) {
             DBG_PRINTLN_L(1,"WiFi: Fast reconnect succeeded!");
-            DBG_PRINTF_L(1,"IP Address: %s\n", WiFi.localIP().toString().c_str());
+            DBG_PRINTF_L(0,"IP Address: %s\n", WiFi.localIP().toString().c_str());
             DBG_PRINTF_L(1,"AP BSSID: %s  Channel: %d  RSSI: %d dBm\n", WiFi.BSSIDstr().c_str(), WiFi.channel(), WiFi.RSSI());
             LED(0, 10, 0); // Green, connected
             persistConnectedNetwork();
@@ -698,7 +708,7 @@ void RoamingWiFiManager::connectToStrongestNetwork() {
     if (WiFi.status() == WL_CONNECTED) {
         wifiConnectedTime = millis();
         DBG_PRINTLN_L(1,"WiFi: Connected successfully!");
-        DBG_PRINTF_L(1,"IP Address: %s\n", WiFi.localIP().toString().c_str());
+        DBG_PRINTF_L(0,"IP Address: %s\n", WiFi.localIP().toString().c_str());
         // Print device MAC and connected BSSID info
         DBG_PRINTF_L(1,"Station MAC: %s\n", WiFi.macAddress().c_str());
         DBG_PRINTF_L(1,"AP BSSID: %s  Channel: %d  RSSI: %d dBm\n", WiFi.BSSIDstr().c_str(), WiFi.channel(), WiFi.RSSI());
@@ -765,7 +775,7 @@ void RoamingWiFiManager::connectToTargetNetwork(const String& ssid, const String
     if (WiFi.status() == WL_CONNECTED) {
         wifiConnectedTime = millis();
         DBG_PRINTLN_L(1,"WiFi: Connected successfully!");
-        DBG_PRINTF_L(1,"IP Address: %s\n", WiFi.localIP().toString().c_str());
+        DBG_PRINTF_L(0,"IP Address: %s\n", WiFi.localIP().toString().c_str());
         DBG_PRINTF_L(1,"Station MAC: %s\n", WiFi.macAddress().c_str());
         DBG_PRINTF_L(1,"AP BSSID: %s  Channel: %d  RSSI: %d dBm\n", WiFi.BSSIDstr().c_str(), WiFi.channel(), WiFi.RSSI());
         LED(0, 10, 0); // Green for connected
@@ -1367,7 +1377,10 @@ void RoamingWiFiManager::setupMainEndpoint() {
         if (!checkHttpAuth(request)) return;
         if (request->url() == "/wifi" || request->url() == "/wifi/") {
             DBG_PRINTLN_L(4,"/wifi requested");
-            request->send(200, "text/html", serverHtml());
+            // Send HTML from PROGMEM directly to avoid creating large String in RAM
+            AsyncWebServerResponse *response = request->beginResponse(200, "text/html", WIFI_HTML);
+            response->addHeader("Content-Encoding", "identity");
+            request->send(response);
         } else {
             DBG_PRINTLN_L(2,"/wifi bad request");
             request->send(404, "text/plain", "/wifi : Bad request");
@@ -1837,16 +1850,31 @@ bool RoamingWiFiManager::handleAsyncScanCompletion() {
         }
 
         ScannedNetwork& entry = scannedNetworkList[autoRescanIndex];
-        entry.ssid = WiFi.SSID(0); // should stay same
-        entry.bssid = WiFi.BSSIDstr(0); // should stay same
-        entry.rssi = WiFi.RSSI(0); // typically updated
-        entry.channel = WiFi.channel(0); // should stay same
-        entry.encryption = (WiFi.encryptionType(0) == WIFI_AUTH_OPEN) ? "Open" : "Encrypted"; // should stay same
-        entry.scanned = true;
-        entry.detected = true;
-        entry.known = isKnownSsid(entry.ssid);
+        bool entryOk = true;
+        if (entry.ssid != WiFi.SSID(0)) {
+            DBG_PRINTF_L(3,"WiFi: Auto-rescan: SSID mismatch! Found SSID=%s, but expected SSID=%s\n", WiFi.SSID(0).c_str(), entry.ssid.c_str());
+            entryOk = false;
+        }
+        if (entry.bssid != WiFi.BSSIDstr(0)) {
+            DBG_PRINTF_L(3,"WiFi: Auto-rescan: BSSID mismatch! Found BSSID=%s, but expected BSSID=%s\n", WiFi.BSSIDstr(0).c_str(), entry.bssid.c_str());
+            entryOk = false;
+        }
+        if (entryOk) {
+            entry.ssid = WiFi.SSID(0); // must stay same
+            entry.bssid = WiFi.BSSIDstr(0); // must stay same
+            entry.rssi = WiFi.RSSI(0); // typically updated
+            entry.channel = WiFi.channel(0); // should stay same
+            entry.encryption = (WiFi.encryptionType(0) == WIFI_AUTH_OPEN) ? "Open" : "Encrypted"; // should stay same
+            entry.scanned = true;
+            entry.detected = true;
+            entry.known = isKnownSsid(entry.ssid);
 
-        DBG_PRINTF_L(3,"WiFi: Auto-rescan: updated %s RSSI=%d ch=%u\n", entry.bssid.c_str(), (int)entry.rssi, (unsigned)entry.channel);
+            DBG_PRINTF_L(3,"WiFi: Auto-rescan: updated %s index %d RSSI=%d ch=%u\n", entry.bssid.c_str(), (int)autoRescanIndex, (int)entry.rssi, (unsigned)entry.channel);
+        } else {
+            DBG_PRINTF_L(3,"WiFi: Auto-rescan: index %d: entry mismatch, marking as not detected.\n", (int)autoRescanIndex);
+            entry.scanned = true;
+            entry.detected = false;
+        }
         lastNetworksScanTime = millis();
         lastAutoRescanTime = millis();
         lastNetworksScanType = "rescan";
@@ -1968,10 +1996,6 @@ void RoamingWiFiManager::loop() {
 
     // Handle async scan completion
     handleAsyncScanCompletion();
-}
-
-String RoamingWiFiManager::serverHtml() {        
-    return WIFI_HTML; // defined in wifi.html
 }
 
 bool RoamingWiFiManager::useLEDIndicator = true;
