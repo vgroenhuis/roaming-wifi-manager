@@ -534,6 +534,13 @@ JsonDocument RoamingWiFiManager::getScannedNetworksAsJsonDocument() {
     doc["scanAgeSec"] = (lastNetworksScanTime == 0) ? -1 : (int)((millis() - lastNetworksScanTime) / 1000);
     doc["scanCount"] = networkScanCount;
     doc["scanType"] = lastNetworksScanType;
+    
+    // Get currently connected network info for comparison
+    const bool isConnected = (WiFi.status() == WL_CONNECTED);
+    const String currentSsid = isConnected ? WiFi.SSID() : "";
+    const String currentBssid = isConnected ? WiFi.BSSIDstr() : "";
+    const int currentChannel = isConnected ? WiFi.channel() : 0;
+    
     JsonArray scannedNetworks = doc["networks"].to<JsonArray>();
     for (const auto& net : scannedNetworkList) {
         JsonObject network = scannedNetworks.add<JsonObject>();
@@ -545,6 +552,16 @@ JsonDocument RoamingWiFiManager::getScannedNetworksAsJsonDocument() {
         network["scanned"] = net.scanned;
         network["detected"] = net.detected;
         network["known"] = net.known;
+        
+        // Determine if this is the currently connected network (same BSSID and channel)
+        const bool matchBssid = isConnected && net.bssid.equalsIgnoreCase(currentBssid);
+        const bool matchChannel = isConnected && (net.channel == currentChannel);
+        network["connected"] = matchBssid && matchChannel;
+        
+        // Determine if this network has the same SSID as connected but different BSSID
+        const bool sameSsid = isConnected && currentSsid.length() > 0 && net.ssid.equals(currentSsid);
+        const bool differentBssid = !net.bssid.equalsIgnoreCase(currentBssid);
+        network["sameSsidAsConnected"] = sameSsid && differentBssid;
     }
 
     // Expose previously assigned client IP addresses for UI display.

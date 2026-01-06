@@ -4,12 +4,17 @@
     {
     "DC:15:C8:C8:86:A2": "Miklavec home, Sezana, Slovenia",
     "F6:02:28:B6:89:9F": "Vincent mobile",
-    "70:90:41:12:8E:54": "iotroam Small printer room",
-    "70:90:41:22:54:D4": "iotroam Large printer room",
-    "70:90:41:55:6B:94": "iotroam RaM somewhere B",
-    "70:90:41:12:8B:54": "iotroam RaM student space",
-    "70:90:41:55:68:D4": "iotroam Photonics socio corner",
-    "70:90:41:22:57:14": "iotroam RaM technicians",
-    "70:90:41:12:8D:54": "iotroam RaM socio corner?"
+    "70:90:41:12:8E:54": "Small printer room",
+    "70:90:41:22:54:D4": "Large printer room",
+    "70:90:41:55:6B:94": "RaM somewhere B",
+    "70:90:41:12:8B:54": "RaM student space",
+    "70:90:41:55:68:D4": "Photonics socio corner",
+    "70:90:41:22:57:14": "RaM technicians",
+    "70:90:41:12:8D:54": "RaM socio corner?",
+    "70:90:41:12:8A:D4": "RaM 36xx A",
+    "70:90:41:22:39:14": "RaM 36xx B",
+    "70:90:41:22:50:94": "RaM 36xx C",
+    "70:90:41:12:8B:D4": "RaM 36xx D",
+    "70:90:41:12:8D:51": "RaM 36xx E"
     }
 }
