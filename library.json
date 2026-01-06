@@ -1,6 +1,6 @@
 {
   "name": "roaming-wifi-manager",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Wifi roaming manager aimed for mesh wifi networks such as at universities.",
   "keywords": "wifi, mesh, esp32, roaming",
   "repository":
@@ -28,10 +28,20 @@
   ],
   "license": "MIT",
   "homepage": "https://github.com/vgroenhuis/roaming-wifi-manager",
-  "dependencies": {
-    "ESP32Async/ESPAsyncWebServer": "*",
-    "bblanchon/ArduinoJson": "*"
-  },
+  "dependencies": [
+    {
+      "owner": "ESP32Async",
+      "name": "ESPAsyncWebServer",
+      "version": "*",
+      "platforms": ["espressif32"]
+    },
+    {
+      "owner": "bblanchon",
+      "name": "ArduinoJson",
+      "version": "*",
+      "platforms": ["espressif32"]
+    }
+  ],
   "frameworks": "Arduino",
   "platforms": "espressif32"
 }
