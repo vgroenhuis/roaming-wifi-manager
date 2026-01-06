@@ -29,7 +29,8 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
         .sortable { cursor: pointer; user-select: none; }
         .sort-indicator { margin-left: 4px; color: #b9bec7; }
         .connected-row { background: #102019 !important; }
-        .connected-row td { border-left: 4px solid #28a745; }
+        .connected-row td { border-left: 4px solid #28ff45; }
+        .same-ssid-row td { border-left: 4px solid #008000; }
         .known-row td { border-left: 4px solid #007bff; }
         .unknown-row td { border-left: 4px solid #b9bec7; }
         .not-detected-row td { color: #6c717b; }
@@ -645,10 +646,10 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
             const matchBssid = nb && cb && (nb === cb);
             const matchChannel = (channel !== null && currentChannel !== null && channel == currentChannel);
             const connected = matchBssid && matchChannel;
-            if (connected) return '#28a745';
+            if (connected) return '#28ff45';
 
             const sameSsid = currentSSID && ssid && (String(currentSSID) === ssid);
-            if (sameSsid) return '#102019';
+            if (sameSsid) return '#008000';
 
             // Highlight known networks (other than the currently-connected SSID) in blue.
             const known = !!(net && net.known);
@@ -887,7 +888,7 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
                 if (!series || !series.points || series.points.length < 1) continue;
 
                 const color = getSeriesColorForNetwork(net);
-                const undetectedColor = '#404048';
+                const undetectedColor = '#505050';
                 const pointsInWindow = series.points.filter(p => p.t >= startMs);
                 if (pointsInWindow.length === 0) continue;
 
@@ -1087,7 +1088,10 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
                             const connected = matchBssid && matchChannel;
                             const detected = !(network && network.detected === false);
                             const known = !!(network && network.known);
-                            const baseClass = connected ? 'connected-row' : (known ? 'known-row' : 'unknown-row');
+                            // Check if same SSID as currently connected but different BSSID
+                            const networkSSID = (network && network.ssid) ? String(network.ssid) : '';
+                            const sameSsid = currentSSID && networkSSID && (String(currentSSID) === networkSSID) && !connected;
+                            const baseClass = connected ? 'connected-row' : (sameSsid ? 'same-ssid-row' : (known ? 'known-row' : 'unknown-row'));
                             const rowClass = !detected ? `${baseClass} not-detected-row` : baseClass;
                             const ssidArg = JSON.stringify(network.ssid || '');
                             const bssidArg = JSON.stringify(network.bssid || '');

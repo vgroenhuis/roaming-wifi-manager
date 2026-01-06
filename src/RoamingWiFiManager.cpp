@@ -232,7 +232,7 @@ void RoamingWiFiManager::init(std::vector<NetworkCredentials> credentials, Strin
     delay(100);
 
     String stationMac = WiFi.macAddress();
-    DBG_PRINTF_L(2,"WiFi: Station MAC: %s\n", stationMac.c_str());
+    DBG_PRINTF_L(0,"WiFi: Station MAC: %s\n", stationMac.c_str());
 
     const bool persistedSettingsLoaded = loadPersistedSettings();
     wifiPrefs.putBool("lastQuickOK", false); // on next startup it will be false, unless we manage to quick connect
@@ -1373,10 +1373,20 @@ void RoamingWiFiManager::setupSettingsEndpoints() {
 
 void RoamingWiFiManager::setupMainEndpoint() {
     // Serve main wifi page, must be at last
+    // handle root
     server.on("/wifi", HTTP_GET, [this](AsyncWebServerRequest *request) {
         if (!checkHttpAuth(request)) return;
         if (request->url() == "/wifi" || request->url() == "/wifi/") {
             DBG_PRINTLN_L(4,"/wifi requested");
+
+            // Debug: Print WIFI_HTML to serial if debug level is high enough
+            /*
+                        if (debugLevel >= 3) {
+                            DBG_PRINTLN_L(3, "WIFI_HTML content:");
+                            DBG_PRINTLN_L(3, WIFI_HTML);
+                        }
+            */
+
             // Send HTML from PROGMEM directly to avoid creating large String in RAM
             AsyncWebServerResponse *response = request->beginResponse(200, "text/html", WIFI_HTML);
             response->addHeader("Content-Encoding", "identity");
