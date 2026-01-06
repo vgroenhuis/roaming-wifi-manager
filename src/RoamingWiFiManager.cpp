@@ -1390,6 +1390,12 @@ void RoamingWiFiManager::setupMainEndpoint() {
             // Send HTML from PROGMEM directly to avoid creating large String in RAM
             AsyncWebServerResponse *response = request->beginResponse(200, "text/html", WIFI_HTML);
             response->addHeader("Content-Encoding", "identity");
+            
+            // Calculate and set Content-Length header for proper HTTP response
+            size_t contentLength = strlen_P(WIFI_HTML);
+            response->addHeader("Content-Length", String(contentLength));
+            response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+
             request->send(response);
         } else {
             DBG_PRINTLN_L(2,"/wifi bad request");
