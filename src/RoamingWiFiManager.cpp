@@ -112,6 +112,24 @@ void RoamingWiFiManager::loadScanSettings() {
         wifiPrefs.putBool("autoRescTestCh", true);
     }
     autoRescanTestChannels = wifiPrefs.getBool("autoRescTestCh", true);
+
+    // Whether to skip non-detected networks during rescan.
+    // Default to true to avoid wasting resources on networks that are out of range.
+    if (!wifiPrefs.isKey("autoRescSkipNd")) {
+        wifiPrefs.putBool("autoRescSkipNd", true);
+    }
+    autoRescanSkipNotDetected = wifiPrefs.getBool("autoRescSkipNd", true);
+
+    // Wait interval between consecutive scans during auto-rescan.
+    // Default to 0.0 for backward compatibility (no delay).
+    if (!wifiPrefs.isKey("autoRescWaSecF")) {
+        wifiPrefs.putFloat("autoRescWaSecF", 0.0f);
+    }
+    float vWaitSec = wifiPrefs.getFloat("autoRescWaSecF", 0.0f);
+    if (!(vWaitSec >= 0.0f && vWaitSec <= 10.0f)) {
+        vWaitSec = 0.0f;
+    }
+    autoRescanWaitIntervalSec = vWaitSec;
 }
 
 void RoamingWiFiManager::loadStatusSettings() {
@@ -232,7 +250,7 @@ void RoamingWiFiManager::init(std::vector<NetworkCredentials> credentials, Strin
     delay(100);
 
     String stationMac = WiFi.macAddress();
-    DBG_PRINTF_L(2,"WiFi: Station MAC: %s\n", stationMac.c_str());
+    DBG_PRINTF_L(0,"WiFi: Station MAC: %s\n", stationMac.c_str());
 
     const bool persistedSettingsLoaded = loadPersistedSettings();
     wifiPrefs.putBool("lastQuickOK", false); // on next startup it will be false, unless we manage to quick connect
@@ -534,6 +552,13 @@ JsonDocument RoamingWiFiManager::getScannedNetworksAsJsonDocument() {
     doc["scanAgeSec"] = (lastNetworksScanTime == 0) ? -1 : (int)((millis() - lastNetworksScanTime) / 1000);
     doc["scanCount"] = networkScanCount;
     doc["scanType"] = lastNetworksScanType;
+    
+    // Get currently connected network info for comparison
+    const bool isConnected = (WiFi.status() == WL_CONNECTED);
+    const String currentSsid = isConnected ? WiFi.SSID() : "";
+    const String currentBssid = isConnected ? WiFi.BSSIDstr() : "";
+    const int currentChannel = isConnected ? WiFi.channel() : 0;
+    
     JsonArray scannedNetworks = doc["networks"].to<JsonArray>();
     for (const auto& net : scannedNetworkList) {
         JsonObject network = scannedNetworks.add<JsonObject>();
@@ -545,6 +570,16 @@ JsonDocument RoamingWiFiManager::getScannedNetworksAsJsonDocument() {
         network["scanned"] = net.scanned;
         network["detected"] = net.detected;
         network["known"] = net.known;
+        
+        // Determine if this is the currently connected network (same BSSID and channel)
+        const bool matchBssid = isConnected && net.bssid.equalsIgnoreCase(currentBssid);
+        const bool matchChannel = isConnected && (net.channel == currentChannel);
+        network["connected"] = matchBssid && matchChannel;
+        
+        // Determine if this network has the same SSID as connected but different BSSID
+        const bool sameSsid = isConnected && currentSsid.length() > 0 && net.ssid.equals(currentSsid);
+        const bool differentBssid = !net.bssid.equalsIgnoreCase(currentBssid);
+        network["sameSsidAsConnected"] = sameSsid && differentBssid;
     }
 
     // Expose previously assigned client IP addresses for UI display.
@@ -564,27 +599,37 @@ void RoamingWiFiManager::sortNetworks() {
         return;
     }
     // Desired order:
-    // 1) Networks with SSID equal to currently connected SSID (if connected), sorted by RSSI
-    // 2) Other known networks (excluding current SSID), sorted by RSSI
-    // 3) Remaining (unknown) networks, sorted by RSSI
+    // 1) Detected networks with same SSID as connected (including connected network), sorted by RSSI
+    // 2) Non-detected networks with same SSID as connected (sorted by RSSI)
+    // 3) Other known networks (sorted by RSSI)
+    // 4) Remaining (unknown) networks (sorted by RSSI)
 
-    const String currentSsid = WiFi.SSID();
+    const bool isConnected = (WiFi.status() == WL_CONNECTED);
+    const String currentSsid = isConnected ? WiFi.SSID() : "";
 
-    std::vector<ScannedNetwork> groupCurrentSsid;
+    std::vector<ScannedNetwork> groupSameSsidDetected;
+    std::vector<ScannedNetwork> groupSameSsidNotDetected;
     std::vector<ScannedNetwork> groupKnownOther;
     std::vector<ScannedNetwork> groupUnknown;
 
-    groupCurrentSsid.reserve(scannedNetworkList.size());
+    groupSameSsidDetected.reserve(scannedNetworkList.size());
+    groupSameSsidNotDetected.reserve(scannedNetworkList.size());
     groupKnownOther.reserve(scannedNetworkList.size());
     groupUnknown.reserve(scannedNetworkList.size());
 
     for (const auto& net : scannedNetworkList) {
-        const bool isCurrent = (currentSsid.length() > 0) && net.ssid.equals(currentSsid);
-        if (isCurrent) {
-            groupCurrentSsid.push_back(net);
+        // Check if same SSID as connected (including the connected network itself)
+        const bool sameSsid = isConnected && currentSsid.length() > 0 && net.ssid.equals(currentSsid);
+        if (sameSsid) {
+            if (net.detected) {
+                groupSameSsidDetected.push_back(net);
+            } else {
+                groupSameSsidNotDetected.push_back(net);
+            }
             continue;
         }
 
+        // Check if it's a known network (different SSID from connected)
         bool isKnown = false;
         for (const NetworkCredentials& known : knownNetworks) {
             if (net.ssid.equals(known.ssid)) {
@@ -603,13 +648,16 @@ void RoamingWiFiManager::sortNetworks() {
         return a.rssi > b.rssi;
     };
 
-    std::sort(groupCurrentSsid.begin(), groupCurrentSsid.end(), rssiDesc);
+    std::sort(groupSameSsidDetected.begin(), groupSameSsidDetected.end(), rssiDesc);
+    std::sort(groupSameSsidNotDetected.begin(), groupSameSsidNotDetected.end(), rssiDesc);
     std::sort(groupKnownOther.begin(), groupKnownOther.end(), rssiDesc);
     std::sort(groupUnknown.begin(), groupUnknown.end(), rssiDesc);
 
     scannedNetworkList.clear();
-    scannedNetworkList.reserve(groupCurrentSsid.size() + groupKnownOther.size() + groupUnknown.size());
-    scannedNetworkList.insert(scannedNetworkList.end(), groupCurrentSsid.begin(), groupCurrentSsid.end());
+    scannedNetworkList.reserve(groupSameSsidDetected.size() + groupSameSsidNotDetected.size() + 
+                                groupKnownOther.size() + groupUnknown.size());
+    scannedNetworkList.insert(scannedNetworkList.end(), groupSameSsidDetected.begin(), groupSameSsidDetected.end());
+    scannedNetworkList.insert(scannedNetworkList.end(), groupSameSsidNotDetected.begin(), groupSameSsidNotDetected.end());
     scannedNetworkList.insert(scannedNetworkList.end(), groupKnownOther.begin(), groupKnownOther.end());
     scannedNetworkList.insert(scannedNetworkList.end(), groupUnknown.begin(), groupUnknown.end());
 }
@@ -1040,19 +1088,27 @@ void RoamingWiFiManager::setupSettingsEndpoints() {
         float rescanIntervalSec = doc["rescanIntervalSec"] | autoRescanKnownIntervalSec;
         bool rescanKnownOnly = doc["rescanKnownOnly"] | autoRescanKnownOnlySetting;
         bool rescanTestChannels = doc["rescanTestChannels"] | autoRescanTestChannels;
+        bool rescanSkipNotDetected = doc["rescanSkipNotDetected"] | autoRescanSkipNotDetected;
+        float rescanWaitIntervalSec = doc["rescanWaitIntervalSec"] | autoRescanWaitIntervalSec;
         if (!(rescanIntervalSec >= 0.1f && rescanIntervalSec <= 3600.0f)) {
             sendJsonError(request, 400, "rescanIntervalSec out of range (0.1..3600)");
             return;
         }
+        if (!(rescanWaitIntervalSec >= 0.0f && rescanWaitIntervalSec <= 10.0f)) {
+            sendJsonError(request, 400, "rescanWaitIntervalSec out of range (0.0..10.0)");
+            return;
+        }
 
         DBG_PRINTF_L(2,
-            "WiFi: Auto full-scan %s (%.1f sec), auto rescan %s (%.1f sec), known-only=%s, test-channels=%s\n",
+            "WiFi: Auto full-scan %s (%.1f sec), auto rescan %s (%.1f sec), known-only=%s, test-channels=%s, skip-not-detected=%s, wait-interval=%.2f sec\n",
             autoFullScanEnabled ? "enabled" : "disabled",
             (double)autoFullScanIntervalSec,
             autoRescanKnownEnabled ? "enabled" : "disabled",
             (double)autoRescanKnownIntervalSec,
             rescanKnownOnly ? "true" : "false",
-            rescanTestChannels ? "true" : "false"
+            rescanTestChannels ? "true" : "false",
+            rescanSkipNotDetected ? "true" : "false",
+            (double)rescanWaitIntervalSec
         );
 
 
@@ -1062,6 +1118,8 @@ void RoamingWiFiManager::setupSettingsEndpoints() {
         autoRescanKnownIntervalSec = rescanIntervalSec;
         autoRescanKnownOnlySetting = rescanKnownOnly;
         autoRescanTestChannels = rescanTestChannels;
+        autoRescanSkipNotDetected = rescanSkipNotDetected;
+        autoRescanWaitIntervalSec = rescanWaitIntervalSec;
 
         wifiPrefs.putBool("autoFullEn", autoFullScanEnabled);
         wifiPrefs.putFloat("autoFullIntSecF", autoFullScanIntervalSec);
@@ -1069,6 +1127,8 @@ void RoamingWiFiManager::setupSettingsEndpoints() {
         wifiPrefs.putFloat("autoRescIntSecF", autoRescanKnownIntervalSec);
         wifiPrefs.putBool("autoRescKnOnly", autoRescanKnownOnlySetting);
         wifiPrefs.putBool("autoRescTestCh", autoRescanTestChannels);
+        wifiPrefs.putBool("autoRescSkipNd", autoRescanSkipNotDetected);
+        wifiPrefs.putFloat("autoRescWaSecF", autoRescanWaitIntervalSec);
 
         // Reset any in-progress rescan sequence when settings change.
         autoRescanActive = false;
@@ -1089,6 +1149,8 @@ void RoamingWiFiManager::setupSettingsEndpoints() {
         resp["rescanIntervalSec"] = autoRescanKnownIntervalSec;
         resp["rescanKnownOnly"] = autoRescanKnownOnlySetting;
         resp["rescanTestChannels"] = autoRescanTestChannels;
+        resp["rescanSkipNotDetected"] = autoRescanSkipNotDetected;
+        resp["rescanWaitIntervalSec"] = autoRescanWaitIntervalSec;
         String result;
         serializeJson(resp, result);
         request->send(200, "application/json", result);
@@ -1166,6 +1228,8 @@ void RoamingWiFiManager::setupSettingsEndpoints() {
         autoRescanKnownIntervalSec = 1.0f;
         autoRescanKnownOnlySetting = true;
         autoRescanTestChannels = true;
+        autoRescanSkipNotDetected = true;
+        autoRescanWaitIntervalSec = 0.0f;
         statusRefreshIntervalSec = 0.5f;
         statusAutoRefreshEnabled = true;
         autoReconnectEnabled = true;
@@ -1182,6 +1246,8 @@ void RoamingWiFiManager::setupSettingsEndpoints() {
         wifiPrefs.putFloat("autoRescIntSecF", autoRescanKnownIntervalSec);
         wifiPrefs.putBool("autoRescKnOnly", autoRescanKnownOnlySetting);
         wifiPrefs.putBool("autoRescTestCh", autoRescanTestChannels);
+        wifiPrefs.putBool("autoRescSkipNd", autoRescanSkipNotDetected);
+        wifiPrefs.putFloat("autoRescWaSecF", autoRescanWaitIntervalSec);
         wifiPrefs.putFloat("statusIntSecF", statusRefreshIntervalSec);
         wifiPrefs.putBool("statusAutoEn", statusAutoRefreshEnabled);
         wifiPrefs.putUInt("reconEn", autoReconnectEnabled ? 1 : 0);
@@ -1211,6 +1277,8 @@ void RoamingWiFiManager::setupSettingsEndpoints() {
         resp["autoRescanKnownIntervalSec"] = autoRescanKnownIntervalSec;
         resp["autoRescanKnownOnly"] = autoRescanKnownOnlySetting;
         resp["autoRescanTestChannels"] = autoRescanTestChannels;
+        resp["autoRescanSkipNotDetected"] = autoRescanSkipNotDetected;
+        resp["autoRescanWaitIntervalSec"] = autoRescanWaitIntervalSec;
         resp["statusRefreshIntervalSec"] = statusRefreshIntervalSec;
         resp["statusAutoRefreshEnabled"] = statusAutoRefreshEnabled;
         resp["autoReconnectEnabled"] = autoReconnectEnabled;
@@ -1353,6 +1421,8 @@ void RoamingWiFiManager::setupSettingsEndpoints() {
         doc["autoRescanKnownIntervalSec"] = autoRescanKnownIntervalSec;
         doc["autoRescanKnownOnly"] = autoRescanKnownOnlySetting;
         doc["autoRescanTestChannels"] = autoRescanTestChannels;
+        doc["autoRescanSkipNotDetected"] = autoRescanSkipNotDetected;
+        doc["autoRescanWaitIntervalSec"] = autoRescanWaitIntervalSec;
         // Auto-roam fields
         doc["autoRoamEnabled"] = autoRoamEnabled;
         doc["autoRoamDeltaRssiDbm"] = autoRoamDeltaRssiDbm;
@@ -1373,13 +1443,29 @@ void RoamingWiFiManager::setupSettingsEndpoints() {
 
 void RoamingWiFiManager::setupMainEndpoint() {
     // Serve main wifi page, must be at last
+    // handle root
     server.on("/wifi", HTTP_GET, [this](AsyncWebServerRequest *request) {
         if (!checkHttpAuth(request)) return;
         if (request->url() == "/wifi" || request->url() == "/wifi/") {
             DBG_PRINTLN_L(4,"/wifi requested");
+
+            // Debug: Print WIFI_HTML to serial if debug level is high enough
+            /*
+                        if (debugLevel >= 3) {
+                            DBG_PRINTLN_L(3, "WIFI_HTML content:");
+                            DBG_PRINTLN_L(3, WIFI_HTML);
+                        }
+            */
+
             // Send HTML from PROGMEM directly to avoid creating large String in RAM
             AsyncWebServerResponse *response = request->beginResponse(200, "text/html", WIFI_HTML);
             response->addHeader("Content-Encoding", "identity");
+            
+            // Calculate and set Content-Length header for proper HTTP response
+            size_t contentLength = strlen_P(WIFI_HTML);
+            response->addHeader("Content-Length", String(contentLength));
+            response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+
             request->send(response);
         } else {
             DBG_PRINTLN_L(2,"/wifi bad request");
@@ -1518,6 +1604,16 @@ bool RoamingWiFiManager::startAutoRescanNext(bool knownOnly) {
         return false;
     }
 
+    // Check if we need to wait before starting the next scan
+    if (autoRescanWaitIntervalSec > 0.0f && lastAutoRescanSingleScanTime > 0) {
+        unsigned long waitMs = (unsigned long)(autoRescanWaitIntervalSec * 1000.0f);
+        unsigned long elapsedMs = millis() - lastAutoRescanSingleScanTime;
+        if (elapsedMs < waitMs) {
+            // Not enough time has passed, don't start next scan yet
+            return false;
+        }
+    }
+
     if (!autoRescanActive) { // it was not active, so initialize with first entry
         autoRescanActive = true;
         autoRescanIndex = 0;
@@ -1538,16 +1634,27 @@ bool RoamingWiFiManager::startAutoRescanNext(bool knownOnly) {
 
     // Skip entries that are not eligible for this sweep.
     while (autoRescanIndex < scannedNetworkList.size()) {
-        if (!autoRescanKnownOnly) { // rescan all existing entries
-            break;
-        }
         const ScannedNetwork& candidate = scannedNetworkList[autoRescanIndex];
-        if (isKnownSsid(candidate.ssid)) {
-            break;
+        
+        // Skip if we're only scanning known networks and this one is unknown
+        if (autoRescanKnownOnly && !isKnownSsid(candidate.ssid)) {
+            DBG_PRINTF_L(3,"WiFi: Auto-rescan skipping unknown network %s\n", candidate.ssid.c_str());
+            scannedNetworkList[autoRescanIndex].scanned = false;
+            autoRescanIndex++;
+            continue;
         }
-        DBG_PRINTF_L(3,"WiFi: Auto-rescan skipping unknown network %s\n", candidate.ssid.c_str());
-        scannedNetworkList[autoRescanIndex].scanned = false;
-        autoRescanIndex++; // we rescan only known networks, but this one is not known, so skip
+        
+        // Skip if we're skipping non-detected networks and this one is not detected
+        if (autoRescanSkipNotDetected && !candidate.detected) {
+            DBG_PRINTF_L(3,"WiFi: Auto-rescan skipping non-detected network %s (BSSID: %s)\n", 
+                candidate.ssid.c_str(), candidate.bssid.c_str());
+            scannedNetworkList[autoRescanIndex].scanned = false;
+            autoRescanIndex++;
+            continue;
+        }
+        
+        // This entry is eligible for scanning
+        break;
     }
 
     if (autoRescanIndex >= scannedNetworkList.size()) {
@@ -1603,6 +1710,7 @@ bool RoamingWiFiManager::startAutoRescanNext(bool knownOnly) {
         (unsigned)scannedNetworkList.size(),
         autoRescanTargetBssid.c_str(),
         (unsigned)autoRescanTargetChannel);
+    lastAutoRescanSingleScanTime = millis();
     scanNetworkAsync(autoRescanTargetChannel, bssid);
     autoRescanSweepDidScan = true;
     return true;

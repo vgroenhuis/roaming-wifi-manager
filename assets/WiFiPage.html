@@ -29,7 +29,8 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
         .sortable { cursor: pointer; user-select: none; }
         .sort-indicator { margin-left: 4px; color: #b9bec7; }
         .connected-row { background: #102019 !important; }
-        .connected-row td { border-left: 4px solid #28a745; }
+        .connected-row td { border-left: 4px solid #28ff45; }
+        .same-ssid-row td { border-left: 4px solid #008000; }
         .known-row td { border-left: 4px solid #007bff; }
         .unknown-row td { border-left: 4px solid #b9bec7; }
         .not-detected-row td { color: #6c717b; }
@@ -99,8 +100,16 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
                 <span>sec</span>
                 <input class="settings-checkbox" type="checkbox" id="autoRescanKnownOnlyToggle" onchange="updateAutoScanSetting()">
                 <span>Known networks only</span>
+                <input class="settings-checkbox" type="checkbox" id="autoRescanSkipNotDetectedToggle" onchange="updateAutoScanSetting()">
+                <span>Skip non-detected</span>
                 <input class="settings-checkbox" type="checkbox" id="autoRescanTestChannelsToggle" onchange="updateAutoScanSetting()">
                 <span>Radar scan</span>
+            </div>
+
+            <div class="settings-row">
+                <span class="settings-label">Wait between scans:</span>
+                <input class="settings-number" type="number" id="autoRescanWaitInterval" min="0" max="10" step="0.01" value="0" onchange="updateAutoScanSetting()">
+                <span>sec</span>
             </div>
 
             <div class="settings-row">
@@ -280,6 +289,14 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
             // Keep 0.1s resolution to match input step.
             const v = Math.round(n * 10) / 10;
             return Math.max(0.1, Math.min(3600, v));
+        }
+
+        function clampWaitIntervalSec(value, fallback) {
+            const n = Number(value);
+            if (!Number.isFinite(n)) return fallback;
+            // Keep 0.01s (10ms) resolution to match input step.
+            const v = Math.round(n * 100) / 100;
+            return Math.max(0, Math.min(10, v));
         }
 
         function setStatusAutoRefreshEnabledFromServer(enabled) {
@@ -636,26 +653,18 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
         }
 
         function getSeriesColorForNetwork(net) {
-            const ssid = (net && net.ssid) ? String(net.ssid) : '';
-            const bssid = (net && net.bssid) ? String(net.bssid) : '';
-            const channel = (net && net.channel != null) ? net.channel : null;
+            // Use backend-provided attributes for accurate color determination
+            const connected = !!(net && net.connected);
+            if (connected) return '#28a745'; // Bright green for connected
 
-            const nb = bssid.toLowerCase();
-            const cb = currentBSSID ? String(currentBSSID).toLowerCase() : '';
-            const matchBssid = nb && cb && (nb === cb);
-            const matchChannel = (channel !== null && currentChannel !== null && channel == currentChannel);
-            const connected = matchBssid && matchChannel;
-            if (connected) return '#28a745';
+            const sameSsidAsConnected = !!(net && net.sameSsidAsConnected);
+            if (sameSsidAsConnected) return '#006400'; // Dark green for same SSID
 
-            const sameSsid = currentSSID && ssid && (String(currentSSID) === ssid);
-            if (sameSsid) return '#102019';
-
-            // Highlight known networks (other than the currently-connected SSID) in blue.
+            // Known network with different SSID
             const known = !!(net && net.known);
-            const hasDifferentSsid = currentSSID && ssid && (String(currentSSID) !== ssid);
-            if (known && hasDifferentSsid) return '#007bff';
+            if (known) return '#007bff'; // Blue for other known networks
 
-            return '#b9bec7';
+            return '#b9bec7'; // Gray for unknown networks
         }
 
         function pruneSignalHistory(nowMs) {
@@ -725,7 +734,9 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
                 // Avoid stacking duplicates if polling is faster than 1s.
                 if (!last || (nowMs - last.t) >= 500) {
                     const gap = !!series.hadGap && pts.length > 0;
-                    pts.push({ t: nowMs, rssi: rssi, gap: gap });
+                    // Store color with each point so historical colors are retained
+                    const color = getSeriesColorForNetwork(net);
+                    pts.push({ t: nowMs, rssi: rssi, gap: gap, color: color });
                     series.hadGap = false;
                 }
             }
@@ -886,18 +897,19 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
                 const series = signalHistory.get(key);
                 if (!series || !series.points || series.points.length < 1) continue;
 
-                const color = getSeriesColorForNetwork(net);
                 const undetectedColor = '#404048';
                 const pointsInWindow = series.points.filter(p => p.t >= startMs);
                 if (pointsInWindow.length === 0) continue;
 
-                // 2+ points: draw line segments.
+                // 2+ points: draw line segments using stored color from each point.
                 // If there was an undetected gap between points, draw the connecting segment in gray.
                 ctx.lineWidth = Math.max(1, Math.floor(2 * dpr));
                 for (let i = 1; i < pointsInWindow.length; i++) {
                     const p0 = pointsInWindow[i - 1];
                     const p1 = pointsInWindow[i];
-                    ctx.strokeStyle = (p1 && p1.gap) ? undetectedColor : color;
+                    // Use color from the destination point (p1) for the segment, unless there's a gap
+                    const segmentColor = (p1 && p1.gap) ? undetectedColor : (p1.color || '#b9bec7');
+                    ctx.strokeStyle = segmentColor;
                     ctx.beginPath();
                     ctx.moveTo(xForT(p0.t), yForRssi(p0.rssi));
                     ctx.lineTo(xForT(p1.t), yForRssi(p1.rssi));
@@ -905,12 +917,13 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
                 }
 
                 // Add thin dots at each data point only when window <= 10 minutes
+                // Use the stored color for each individual point
                 if (signalHistoryWindowMs <= 600000) {
                     const dotR = Math.max(1, 1.5 * dpr);
                     for (const p of pointsInWindow) {
                         const x = xForT(p.t);
                         const y = yForRssi(p.rssi);
-                        ctx.fillStyle = color;
+                        ctx.fillStyle = p.color || '#b9bec7';
                         ctx.beginPath();
                         ctx.arc(x, y, dotR, 0, Math.PI * 2);
                         ctx.fill();
@@ -1087,7 +1100,10 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
                             const connected = matchBssid && matchChannel;
                             const detected = !(network && network.detected === false);
                             const known = !!(network && network.known);
-                            const baseClass = connected ? 'connected-row' : (known ? 'known-row' : 'unknown-row');
+                            // Check if same SSID as currently connected but different BSSID
+                            const networkSSID = (network && network.ssid) ? String(network.ssid) : '';
+                            const sameSsid = currentSSID && networkSSID && (String(currentSSID) === networkSSID) && !connected;
+                            const baseClass = connected ? 'connected-row' : (sameSsid ? 'same-ssid-row' : (known ? 'known-row' : 'unknown-row'));
                             const rowClass = !detected ? `${baseClass} not-detected-row` : baseClass;
                             const ssidArg = JSON.stringify(network.ssid || '');
                             const bssidArg = JSON.stringify(network.bssid || '');
@@ -1208,9 +1224,19 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
             if (toggle) toggle.checked = !!knownOnly;
         }
 
+        function setAutoRescanSkipNotDetectedFromServer(skipNotDetected) {
+            const toggle = document.getElementById('autoRescanSkipNotDetectedToggle');
+            if (toggle) toggle.checked = !!skipNotDetected;
+        }
+
         function setAutoRescanTestChannelsFromServer(enabled) {
             const toggle = document.getElementById('autoRescanTestChannelsToggle');
             if (toggle) toggle.checked = !!enabled;
+        }
+
+        function setAutoRescanWaitIntervalFromServer(intervalSec) {
+            const input = document.getElementById('autoRescanWaitInterval');
+            if (input) input.value = String(clampWaitIntervalSec(intervalSec, 0));
         }
 
         console.log('[WiFiPage] Defining updateAutoScanSetting function');
@@ -1221,8 +1247,10 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
             const rescanToggle = document.getElementById('autoRescanKnownToggle');
             const rescanInput = document.getElementById('autoRescanKnownInterval');
             const rescanKnownOnlyToggle = document.getElementById('autoRescanKnownOnlyToggle');
+            const rescanSkipNotDetectedToggle = document.getElementById('autoRescanSkipNotDetectedToggle');
             const rescanTestChannelsToggle = document.getElementById('autoRescanTestChannelsToggle');
-            if (!fullToggle || !fullInput || !rescanToggle || !rescanInput || !rescanKnownOnlyToggle || !rescanTestChannelsToggle) return;
+            const rescanWaitInput = document.getElementById('autoRescanWaitInterval');
+            if (!fullToggle || !fullInput || !rescanToggle || !rescanInput || !rescanKnownOnlyToggle || !rescanSkipNotDetectedToggle || !rescanTestChannelsToggle || !rescanWaitInput) return;
 
             const fullEnabled = !!fullToggle.checked;
             const fullIntervalSec = clampIntervalSec(fullInput.value, 15);
@@ -1233,7 +1261,11 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
             rescanInput.value = String(rescanIntervalSec);
 
             const rescanKnownOnly = !!rescanKnownOnlyToggle.checked;
+            const rescanSkipNotDetected = !!rescanSkipNotDetectedToggle.checked;
             const rescanTestChannels = !!rescanTestChannelsToggle.checked;
+
+            const rescanWaitIntervalSec = clampWaitIntervalSec(rescanWaitInput.value, 0);
+            rescanWaitInput.value = String(rescanWaitIntervalSec);
 
             authenticatedFetch('/wifi/autoscan', {
                 method: 'POST',
@@ -1244,7 +1276,9 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
                     rescanEnabled: rescanEnabled,
                     rescanIntervalSec: rescanIntervalSec,
                     rescanKnownOnly: rescanKnownOnly,
+                    rescanSkipNotDetected: rescanSkipNotDetected,
                     rescanTestChannels: rescanTestChannels,
+                    rescanWaitIntervalSec: rescanWaitIntervalSec,
                 })
             })
             .then(response => response.json())
@@ -1252,13 +1286,17 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
                 setAutoFullScanFromServer(data.fullEnabled ?? fullEnabled, data.fullIntervalSec ?? fullIntervalSec);
                 setAutoRescanKnownFromServer(data.rescanEnabled ?? rescanEnabled, data.rescanIntervalSec ?? rescanIntervalSec);
                 setAutoRescanKnownOnlyFromServer(data.rescanKnownOnly ?? rescanKnownOnly);
+                setAutoRescanSkipNotDetectedFromServer(data.rescanSkipNotDetected ?? rescanSkipNotDetected);
                 setAutoRescanTestChannelsFromServer(data.rescanTestChannels ?? rescanTestChannels);
+                setAutoRescanWaitIntervalFromServer(data.rescanWaitIntervalSec ?? rescanWaitIntervalSec);
             })
             .catch(() => {
                 setAutoFullScanFromServer(fullEnabled, fullIntervalSec);
                 setAutoRescanKnownFromServer(rescanEnabled, rescanIntervalSec);
                 setAutoRescanKnownOnlyFromServer(rescanKnownOnly);
+                setAutoRescanSkipNotDetectedFromServer(rescanSkipNotDetected);
                 setAutoRescanTestChannelsFromServer(rescanTestChannels);
+                setAutoRescanWaitIntervalFromServer(rescanWaitIntervalSec);
             });
         }
 
@@ -1273,12 +1311,15 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
                     const rescanEnabled = data.autoRescanKnownEnabled ?? true;
                     const rescanIntervalSec = data.autoRescanKnownIntervalSec ?? 1;
                     const rescanKnownOnly = data.autoRescanKnownOnly ?? true;
+                    const rescanSkipNotDetected = data.autoRescanSkipNotDetected ?? true;
                     const rescanTestChannels = data.autoRescanTestChannels ?? true;
 
                     setAutoFullScanFromServer(fullEnabled, fullIntervalSec);
                     setAutoRescanKnownFromServer(rescanEnabled, rescanIntervalSec);
                     setAutoRescanKnownOnlyFromServer(rescanKnownOnly);
+                    setAutoRescanSkipNotDetectedFromServer(rescanSkipNotDetected);
                     setAutoRescanTestChannelsFromServer(rescanTestChannels);
+                    setAutoRescanWaitIntervalFromServer(data.autoRescanWaitIntervalSec ?? 0);
                     setStatusAutoRefreshIntervalFromServer(data.statusRefreshIntervalSec ?? 0.5);
                     setStatusAutoRefreshEnabledFromServer(data.statusAutoRefreshEnabled ?? true);
                     setAutoReconnectFromServer(data.autoReconnectEnabled ?? true, data.autoReconnectIntervalSec ?? 5);
@@ -1303,7 +1344,9 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
                     setAutoFullScanFromServer(data.autoFullScanEnabled ?? false, data.autoFullScanIntervalSec ?? 15);
                     setAutoRescanKnownFromServer(data.autoRescanKnownEnabled ?? true, data.autoRescanKnownIntervalSec ?? 1);
                     setAutoRescanKnownOnlyFromServer(data.autoRescanKnownOnly ?? true);
+                    setAutoRescanSkipNotDetectedFromServer(data.autoRescanSkipNotDetected ?? true);
                     setAutoRescanTestChannelsFromServer(data.autoRescanTestChannels ?? true);
+                    setAutoRescanWaitIntervalFromServer(data.autoRescanWaitIntervalSec ?? 0);
                     setStatusAutoRefreshIntervalFromServer(data.statusRefreshIntervalSec ?? 0.5);
                     setStatusAutoRefreshEnabledFromServer(data.statusAutoRefreshEnabled ?? true);
                     setAutoReconnectFromServer(data.autoReconnectEnabled ?? true, data.autoReconnectIntervalSec ?? 5);
