@@ -100,8 +100,16 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
                 <span>sec</span>
                 <input class="settings-checkbox" type="checkbox" id="autoRescanKnownOnlyToggle" onchange="updateAutoScanSetting()">
                 <span>Known networks only</span>
+                <input class="settings-checkbox" type="checkbox" id="autoRescanSkipNotDetectedToggle" onchange="updateAutoScanSetting()">
+                <span>Skip non-detected</span>
                 <input class="settings-checkbox" type="checkbox" id="autoRescanTestChannelsToggle" onchange="updateAutoScanSetting()">
                 <span>Radar scan</span>
+            </div>
+
+            <div class="settings-row">
+                <span class="settings-label">Wait between scans:</span>
+                <input class="settings-number" type="number" id="autoRescanWaitInterval" min="0" max="10" step="0.01" value="0" onchange="updateAutoScanSetting()">
+                <span>sec</span>
             </div>
 
             <div class="settings-row">
@@ -281,6 +289,14 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
             // Keep 0.1s resolution to match input step.
             const v = Math.round(n * 10) / 10;
             return Math.max(0.1, Math.min(3600, v));
+        }
+
+        function clampWaitIntervalSec(value, fallback) {
+            const n = Number(value);
+            if (!Number.isFinite(n)) return fallback;
+            // Keep 0.01s (10ms) resolution to match input step.
+            const v = Math.round(n * 100) / 100;
+            return Math.max(0, Math.min(10, v));
         }
 
         function setStatusAutoRefreshEnabledFromServer(enabled) {
@@ -1208,9 +1224,19 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
             if (toggle) toggle.checked = !!knownOnly;
         }
 
+        function setAutoRescanSkipNotDetectedFromServer(skipNotDetected) {
+            const toggle = document.getElementById('autoRescanSkipNotDetectedToggle');
+            if (toggle) toggle.checked = !!skipNotDetected;
+        }
+
         function setAutoRescanTestChannelsFromServer(enabled) {
             const toggle = document.getElementById('autoRescanTestChannelsToggle');
             if (toggle) toggle.checked = !!enabled;
+        }
+
+        function setAutoRescanWaitIntervalFromServer(intervalSec) {
+            const input = document.getElementById('autoRescanWaitInterval');
+            if (input) input.value = String(clampWaitIntervalSec(intervalSec, 0));
         }
 
         console.log('[WiFiPage] Defining updateAutoScanSetting function');
@@ -1221,8 +1247,10 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
             const rescanToggle = document.getElementById('autoRescanKnownToggle');
             const rescanInput = document.getElementById('autoRescanKnownInterval');
             const rescanKnownOnlyToggle = document.getElementById('autoRescanKnownOnlyToggle');
+            const rescanSkipNotDetectedToggle = document.getElementById('autoRescanSkipNotDetectedToggle');
             const rescanTestChannelsToggle = document.getElementById('autoRescanTestChannelsToggle');
-            if (!fullToggle || !fullInput || !rescanToggle || !rescanInput || !rescanKnownOnlyToggle || !rescanTestChannelsToggle) return;
+            const rescanWaitInput = document.getElementById('autoRescanWaitInterval');
+            if (!fullToggle || !fullInput || !rescanToggle || !rescanInput || !rescanKnownOnlyToggle || !rescanSkipNotDetectedToggle || !rescanTestChannelsToggle || !rescanWaitInput) return;
 
             const fullEnabled = !!fullToggle.checked;
             const fullIntervalSec = clampIntervalSec(fullInput.value, 15);
@@ -1233,7 +1261,11 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
             rescanInput.value = String(rescanIntervalSec);
 
             const rescanKnownOnly = !!rescanKnownOnlyToggle.checked;
+            const rescanSkipNotDetected = !!rescanSkipNotDetectedToggle.checked;
             const rescanTestChannels = !!rescanTestChannelsToggle.checked;
+
+            const rescanWaitIntervalSec = clampWaitIntervalSec(rescanWaitInput.value, 0);
+            rescanWaitInput.value = String(rescanWaitIntervalSec);
 
             authenticatedFetch('/wifi/autoscan', {
                 method: 'POST',
@@ -1244,7 +1276,9 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
                     rescanEnabled: rescanEnabled,
                     rescanIntervalSec: rescanIntervalSec,
                     rescanKnownOnly: rescanKnownOnly,
+                    rescanSkipNotDetected: rescanSkipNotDetected,
                     rescanTestChannels: rescanTestChannels,
+                    rescanWaitIntervalSec: rescanWaitIntervalSec,
                 })
             })
             .then(response => response.json())
@@ -1252,13 +1286,17 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
                 setAutoFullScanFromServer(data.fullEnabled ?? fullEnabled, data.fullIntervalSec ?? fullIntervalSec);
                 setAutoRescanKnownFromServer(data.rescanEnabled ?? rescanEnabled, data.rescanIntervalSec ?? rescanIntervalSec);
                 setAutoRescanKnownOnlyFromServer(data.rescanKnownOnly ?? rescanKnownOnly);
+                setAutoRescanSkipNotDetectedFromServer(data.rescanSkipNotDetected ?? rescanSkipNotDetected);
                 setAutoRescanTestChannelsFromServer(data.rescanTestChannels ?? rescanTestChannels);
+                setAutoRescanWaitIntervalFromServer(data.rescanWaitIntervalSec ?? rescanWaitIntervalSec);
             })
             .catch(() => {
                 setAutoFullScanFromServer(fullEnabled, fullIntervalSec);
                 setAutoRescanKnownFromServer(rescanEnabled, rescanIntervalSec);
                 setAutoRescanKnownOnlyFromServer(rescanKnownOnly);
+                setAutoRescanSkipNotDetectedFromServer(rescanSkipNotDetected);
                 setAutoRescanTestChannelsFromServer(rescanTestChannels);
+                setAutoRescanWaitIntervalFromServer(rescanWaitIntervalSec);
             });
         }
 
@@ -1273,12 +1311,15 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
                     const rescanEnabled = data.autoRescanKnownEnabled ?? true;
                     const rescanIntervalSec = data.autoRescanKnownIntervalSec ?? 1;
                     const rescanKnownOnly = data.autoRescanKnownOnly ?? true;
+                    const rescanSkipNotDetected = data.autoRescanSkipNotDetected ?? true;
                     const rescanTestChannels = data.autoRescanTestChannels ?? true;
 
                     setAutoFullScanFromServer(fullEnabled, fullIntervalSec);
                     setAutoRescanKnownFromServer(rescanEnabled, rescanIntervalSec);
                     setAutoRescanKnownOnlyFromServer(rescanKnownOnly);
+                    setAutoRescanSkipNotDetectedFromServer(rescanSkipNotDetected);
                     setAutoRescanTestChannelsFromServer(rescanTestChannels);
+                    setAutoRescanWaitIntervalFromServer(data.autoRescanWaitIntervalSec ?? 0);
                     setStatusAutoRefreshIntervalFromServer(data.statusRefreshIntervalSec ?? 0.5);
                     setStatusAutoRefreshEnabledFromServer(data.statusAutoRefreshEnabled ?? true);
                     setAutoReconnectFromServer(data.autoReconnectEnabled ?? true, data.autoReconnectIntervalSec ?? 5);
@@ -1303,7 +1344,9 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
                     setAutoFullScanFromServer(data.autoFullScanEnabled ?? false, data.autoFullScanIntervalSec ?? 15);
                     setAutoRescanKnownFromServer(data.autoRescanKnownEnabled ?? true, data.autoRescanKnownIntervalSec ?? 1);
                     setAutoRescanKnownOnlyFromServer(data.autoRescanKnownOnly ?? true);
+                    setAutoRescanSkipNotDetectedFromServer(data.autoRescanSkipNotDetected ?? true);
                     setAutoRescanTestChannelsFromServer(data.autoRescanTestChannels ?? true);
+                    setAutoRescanWaitIntervalFromServer(data.autoRescanWaitIntervalSec ?? 0);
                     setStatusAutoRefreshIntervalFromServer(data.statusRefreshIntervalSec ?? 0.5);
                     setStatusAutoRefreshEnabledFromServer(data.statusAutoRefreshEnabled ?? true);
                     setAutoReconnectFromServer(data.autoReconnectEnabled ?? true, data.autoReconnectIntervalSec ?? 5);

@@ -132,6 +132,9 @@ class RoamingWiFiManager {
         bool autoRescanSweepDidScan = false; // true if this rescan sweep actually started at least one scan
         bool autoRescanKnownOnly = false; // true if the current rescan sweep only targets known networks; for now managed by startAutoRescanNext(knownOnly)
         bool autoRescanTestChannels = true; // if true, after full auto-rescan sweep, also test one channel
+        bool autoRescanSkipNotDetected = true; // if true, skip non-detected networks during rescan to avoid wasting resources
+        float autoRescanWaitIntervalSec = 0.0f; // wait time between consecutive scans during auto-rescan (seconds), persisted
+        unsigned long lastAutoRescanSingleScanTime = 0; // timestamp when last single network scan completed (ms)
         int autoRescanTestChannelIndex = -1; // last channel tested if autoRescanTestChannels is true
         std::vector<int> autoRescanTestChannelList = {36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144, 149, 153, 157, 161, 165, 169, 173, 177}; // list of channels to test if autoRescanTestChannels is true
         bool connectionRequested = false; // Flag for connection request from web interface
