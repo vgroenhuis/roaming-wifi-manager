@@ -581,27 +581,50 @@ void RoamingWiFiManager::sortNetworks() {
         return;
     }
     // Desired order:
-    // 1) Networks with SSID equal to currently connected SSID (if connected), sorted by RSSI
-    // 2) Other known networks (excluding current SSID), sorted by RSSI
-    // 3) Remaining (unknown) networks, sorted by RSSI
+    // 1) Connected network (exact BSSID + channel match)
+    // 2) Detected networks with same SSID as connected (sorted by RSSI)
+    // 3) Non-detected networks with same SSID as connected (sorted by RSSI)
+    // 4) Other known networks (sorted by RSSI)
+    // 5) Remaining (unknown) networks (sorted by RSSI)
 
-    const String currentSsid = WiFi.SSID();
+    const bool isConnected = (WiFi.status() == WL_CONNECTED);
+    const String currentSsid = isConnected ? WiFi.SSID() : "";
+    const String currentBssid = isConnected ? WiFi.BSSIDstr() : "";
+    const int currentChannel = isConnected ? WiFi.channel() : 0;
 
-    std::vector<ScannedNetwork> groupCurrentSsid;
+    std::vector<ScannedNetwork> groupConnected;
+    std::vector<ScannedNetwork> groupSameSsidDetected;
+    std::vector<ScannedNetwork> groupSameSsidNotDetected;
     std::vector<ScannedNetwork> groupKnownOther;
     std::vector<ScannedNetwork> groupUnknown;
 
-    groupCurrentSsid.reserve(scannedNetworkList.size());
+    groupConnected.reserve(1);
+    groupSameSsidDetected.reserve(scannedNetworkList.size());
+    groupSameSsidNotDetected.reserve(scannedNetworkList.size());
     groupKnownOther.reserve(scannedNetworkList.size());
     groupUnknown.reserve(scannedNetworkList.size());
 
     for (const auto& net : scannedNetworkList) {
-        const bool isCurrent = (currentSsid.length() > 0) && net.ssid.equals(currentSsid);
-        if (isCurrent) {
-            groupCurrentSsid.push_back(net);
+        // Check if this is the exact connected network (BSSID + channel match)
+        const bool matchBssid = isConnected && net.bssid.equalsIgnoreCase(currentBssid);
+        const bool matchChannel = isConnected && (net.channel == currentChannel);
+        if (matchBssid && matchChannel) {
+            groupConnected.push_back(net);
             continue;
         }
 
+        // Check if same SSID as connected but different BSSID
+        const bool sameSsid = isConnected && currentSsid.length() > 0 && net.ssid.equals(currentSsid);
+        if (sameSsid) {
+            if (net.detected) {
+                groupSameSsidDetected.push_back(net);
+            } else {
+                groupSameSsidNotDetected.push_back(net);
+            }
+            continue;
+        }
+
+        // Check if it's a known network (different SSID from connected)
         bool isKnown = false;
         for (const NetworkCredentials& known : knownNetworks) {
             if (net.ssid.equals(known.ssid)) {
@@ -620,13 +643,17 @@ void RoamingWiFiManager::sortNetworks() {
         return a.rssi > b.rssi;
     };
 
-    std::sort(groupCurrentSsid.begin(), groupCurrentSsid.end(), rssiDesc);
+    std::sort(groupSameSsidDetected.begin(), groupSameSsidDetected.end(), rssiDesc);
+    std::sort(groupSameSsidNotDetected.begin(), groupSameSsidNotDetected.end(), rssiDesc);
     std::sort(groupKnownOther.begin(), groupKnownOther.end(), rssiDesc);
     std::sort(groupUnknown.begin(), groupUnknown.end(), rssiDesc);
 
     scannedNetworkList.clear();
-    scannedNetworkList.reserve(groupCurrentSsid.size() + groupKnownOther.size() + groupUnknown.size());
-    scannedNetworkList.insert(scannedNetworkList.end(), groupCurrentSsid.begin(), groupCurrentSsid.end());
+    scannedNetworkList.reserve(groupConnected.size() + groupSameSsidDetected.size() + 
+                                groupSameSsidNotDetected.size() + groupKnownOther.size() + groupUnknown.size());
+    scannedNetworkList.insert(scannedNetworkList.end(), groupConnected.begin(), groupConnected.end());
+    scannedNetworkList.insert(scannedNetworkList.end(), groupSameSsidDetected.begin(), groupSameSsidDetected.end());
+    scannedNetworkList.insert(scannedNetworkList.end(), groupSameSsidNotDetected.begin(), groupSameSsidNotDetected.end());
     scannedNetworkList.insert(scannedNetworkList.end(), groupKnownOther.begin(), groupKnownOther.end());
     scannedNetworkList.insert(scannedNetworkList.end(), groupUnknown.begin(), groupUnknown.end());
 }

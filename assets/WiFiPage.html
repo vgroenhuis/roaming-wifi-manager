@@ -637,26 +637,18 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
         }
 
         function getSeriesColorForNetwork(net) {
-            const ssid = (net && net.ssid) ? String(net.ssid) : '';
-            const bssid = (net && net.bssid) ? String(net.bssid) : '';
-            const channel = (net && net.channel != null) ? net.channel : null;
+            // Use backend-provided attributes for accurate color determination
+            const connected = !!(net && net.connected);
+            if (connected) return '#28a745'; // Bright green for connected
 
-            const nb = bssid.toLowerCase();
-            const cb = currentBSSID ? String(currentBSSID).toLowerCase() : '';
-            const matchBssid = nb && cb && (nb === cb);
-            const matchChannel = (channel !== null && currentChannel !== null && channel == currentChannel);
-            const connected = matchBssid && matchChannel;
-            if (connected) return '#28ff45';
+            const sameSsidAsConnected = !!(net && net.sameSsidAsConnected);
+            if (sameSsidAsConnected) return '#006400'; // Dark green for same SSID
 
-            const sameSsid = currentSSID && ssid && (String(currentSSID) === ssid);
-            if (sameSsid) return '#008000';
-
-            // Highlight known networks (other than the currently-connected SSID) in blue.
+            // Known network with different SSID
             const known = !!(net && net.known);
-            const hasDifferentSsid = currentSSID && ssid && (String(currentSSID) !== ssid);
-            if (known && hasDifferentSsid) return '#007bff';
+            if (known) return '#007bff'; // Blue for other known networks
 
-            return '#b9bec7';
+            return '#b9bec7'; // Gray for unknown networks
         }
 
         function pruneSignalHistory(nowMs) {
@@ -726,7 +718,9 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
                 // Avoid stacking duplicates if polling is faster than 1s.
                 if (!last || (nowMs - last.t) >= 500) {
                     const gap = !!series.hadGap && pts.length > 0;
-                    pts.push({ t: nowMs, rssi: rssi, gap: gap });
+                    // Store color with each point so historical colors are retained
+                    const color = getSeriesColorForNetwork(net);
+                    pts.push({ t: nowMs, rssi: rssi, gap: gap, color: color });
                     series.hadGap = false;
                 }
             }
@@ -887,18 +881,19 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
                 const series = signalHistory.get(key);
                 if (!series || !series.points || series.points.length < 1) continue;
 
-                const color = getSeriesColorForNetwork(net);
-                const undetectedColor = '#505050';
+                const undetectedColor = '#404048';
                 const pointsInWindow = series.points.filter(p => p.t >= startMs);
                 if (pointsInWindow.length === 0) continue;
 
-                // 2+ points: draw line segments.
+                // 2+ points: draw line segments using stored color from each point.
                 // If there was an undetected gap between points, draw the connecting segment in gray.
                 ctx.lineWidth = Math.max(1, Math.floor(2 * dpr));
                 for (let i = 1; i < pointsInWindow.length; i++) {
                     const p0 = pointsInWindow[i - 1];
                     const p1 = pointsInWindow[i];
-                    ctx.strokeStyle = (p1 && p1.gap) ? undetectedColor : color;
+                    // Use color from the destination point (p1) for the segment, unless there's a gap
+                    const segmentColor = (p1 && p1.gap) ? undetectedColor : (p1.color || '#b9bec7');
+                    ctx.strokeStyle = segmentColor;
                     ctx.beginPath();
                     ctx.moveTo(xForT(p0.t), yForRssi(p0.rssi));
                     ctx.lineTo(xForT(p1.t), yForRssi(p1.rssi));
@@ -906,12 +901,13 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
                 }
 
                 // Add thin dots at each data point only when window <= 10 minutes
+                // Use the stored color for each individual point
                 if (signalHistoryWindowMs <= 600000) {
                     const dotR = Math.max(1, 1.5 * dpr);
                     for (const p of pointsInWindow) {
                         const x = xForT(p.t);
                         const y = yForRssi(p.rssi);
-                        ctx.fillStyle = color;
+                        ctx.fillStyle = p.color || '#b9bec7';
                         ctx.beginPath();
                         ctx.arc(x, y, dotR, 0, Math.PI * 2);
                         ctx.fill();
