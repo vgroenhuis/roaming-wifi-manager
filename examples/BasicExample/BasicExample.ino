@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include "RoamingWiFiManager.h"
 
 RoamingWiFiManager manager;
