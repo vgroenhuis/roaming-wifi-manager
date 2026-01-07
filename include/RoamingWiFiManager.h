@@ -1,5 +1,5 @@
 #pragma once
-#include <Arduino.h>
+//#include <Arduino.h>
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
@@ -31,7 +31,13 @@ public:
 class RoamingWiFiManager {
     public:
         // Reads MAC address from wifi chip and prints it to Serial. Also sets mode to STA and 5GHz.
-        static void printMAC();
+        //static void printMAC();
+
+        // Returns MAC address of the wifi chip as a string.
+        static String getMAC();
+
+        // Returns the IP address of the currently connected network as a string. If not connected, returns "".
+        String getConnectedIp();
 
         // By default the manager controls the LED. Disable it to control it yourself.
         static void setUseLEDIndicator(bool enable);
@@ -40,7 +46,7 @@ class RoamingWiFiManager {
         RoamingWiFiManager(int serverPort=80);
 
         // Initializes the RoamingWiFiManager with known networks, optional BSSID alias URL, and optional admin credentials.
-        void init(std::vector<NetworkCredentials> knownCredentials, String bssidAliasesUrl = "", String adminUser="", String adminPassword="");
+        void init(std::vector<NetworkCredentials> knownCredentials, std::pair<String, String> adminCredentials = {"", ""}, String bssidAliasesUrl = "");
 
         bool isConnected() {
             return (WiFi.status() == WL_CONNECTED);

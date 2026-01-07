@@ -45,13 +45,28 @@ bool RoamingWiFiManager::parseBssid(const String& bssidStr, uint8_t bssid[6]) {
         &bssid[0], &bssid[1], &bssid[2], &bssid[3], &bssid[4], &bssid[5]) == 6);
 }
 
-
+/*
 void RoamingWiFiManager::printMAC() {
     uint8_t mac[6];
 
     WiFi.mode(WIFI_STA);
     WiFi.setBandMode(WIFI_BAND_MODE_5G_ONLY);
     DBG_PRINTF_L(1, "ESP32 WiFi MAC Address: %s\n", WiFi.macAddress().c_str());
+}*/
+
+String RoamingWiFiManager::getMAC() {
+    WiFi.mode(WIFI_STA);
+    WiFi.setBandMode(WIFI_BAND_MODE_5G_ONLY);
+    return WiFi.macAddress();
+}
+
+
+String RoamingWiFiManager::getConnectedIp() {
+    if (WiFi.status() != WL_CONNECTED) {
+        return "";
+    }
+    IPAddress ip = WiFi.localIP();
+    return ip.toString();
 }
 
 
@@ -222,12 +237,12 @@ bool RoamingWiFiManager::loadPersistedSettings() {
 }
 
 
-void RoamingWiFiManager::init(std::vector<NetworkCredentials> credentials, String bssidAliasesUrl, String adminUser, String adminPassword) {
+void RoamingWiFiManager::init(std::vector<NetworkCredentials> credentials, std::pair<String, String> adminCredentials, String bssidAliasesUrl) {
     LED(50, 50, 50); // White
 
     this->bssidAliasesUrl = bssidAliasesUrl;
-    _adminUser = adminUser;
-    _adminPassword = adminPassword;
+    _adminUser = adminCredentials.first;
+    _adminPassword = adminCredentials.second;
     knownNetworks = credentials;
 
     if (knownNetworks.size() == 1) {

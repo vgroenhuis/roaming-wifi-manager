@@ -3,22 +3,20 @@
 
 RoamingWiFiManager manager;
 
-#ifndef WIFI_SSID
-#define WIFI_SSID "your-ssid"
-#define WIFI_PASSWORD "your-password"
+#ifndef WIFI_CREDENTIALS
+#define WIFI_CREDENTIALS {{"your-ssid","your-password"},{"your-ssid2","your-password2"}}
+#endif
+
+#ifndef ADMIN_CREDENTIALS
+#define ADMIN_CREDENTIALS {"",""}
 #endif
 
 #ifndef ALIAS_URL
 #define ALIAS_URL ""
 #endif
-#ifndef ADMIN_USER
-#define ADMIN_USER ""
-#define ADMIN_PASSWORD ""
-#endif
 
-const std::vector<NetworkCredentials> knownNetworks = {{WIFI_SSID,WIFI_PASSWORD},{"PhoneHotspot", "asdf1234"}, {"iotroam", "passroam"}};
-const String adminUser = ADMIN_USER;
-const String adminPassword = ADMIN_PASSWORD; // leave blank for no authentication
+const std::vector<NetworkCredentials> knownNetworks = WIFI_CREDENTIALS;
+const std::pair<String, String> adminCredentials = ADMIN_CREDENTIALS;
 const String aliasUrl = ALIAS_URL;
 bool showPasswordOnRootPage = true;
 
@@ -38,17 +36,17 @@ R"rawliteral(<!DOCTYPE html>
 </html>
 )rawliteral";
 
-    if (adminPassword.isEmpty() || adminUser.isEmpty()) {
+    if (adminCredentials.first == "" || adminCredentials.second == "") {
         html.replace("$AUTH_INFO$", "(no authentication)");
     } else {
-        html.replace("$AUTH_INFO$", "(user: " + adminUser + ", pass: " + (showPasswordOnRootPage?adminPassword:"****") + ")");
+        html.replace("$AUTH_INFO$", "(user: " + adminCredentials.first + ", pass: " + (showPasswordOnRootPage?adminCredentials.second:"****") + ")");
     }
     request->send(200, "text/html", html);
 }
 
 void setup() {
     Serial.begin(115200);
-    manager.init(knownNetworks, aliasUrl, adminUser, adminPassword);
+    manager.init(knownNetworks, adminCredentials, aliasUrl);
     // The manager already set up the ESP32AsyncWebServer instance at manager.server, but we can add our own routes to it.
     manager.server.on("/", [] (AsyncWebServerRequest *request) {
         handleRoot(request);
