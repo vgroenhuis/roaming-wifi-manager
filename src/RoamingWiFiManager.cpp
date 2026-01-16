@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <mbedtls/base64.h>
 
-#include "../assets/WiFiPage.html" // contains the WIFI_HTML string
+#include "WiFiPage.html.h" // contains the WIFI_HTML string
 
 // Runtime debug level control
 #define DBG_PRINT_L(minLevel, ...)  if (RoamingWiFiManager::debugLevel >= (minLevel)) { Serial.print(__VA_ARGS__); }
@@ -1473,6 +1473,9 @@ void RoamingWiFiManager::setupMainEndpoint() {
             */
 
             // Send HTML from PROGMEM directly to avoid creating large String in RAM
+            request->send(200, "text/html", WIFI_HTML);
+
+            /*
             AsyncWebServerResponse *response = request->beginResponse(200, "text/html", WIFI_HTML);
             response->addHeader("Content-Encoding", "identity");
             
@@ -1482,6 +1485,7 @@ void RoamingWiFiManager::setupMainEndpoint() {
             response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
 
             request->send(response);
+            */
         } else {
             DBG_PRINTLN_L(2,"/wifi bad request");
             request->send(404, "text/plain", "/wifi : Bad request");
