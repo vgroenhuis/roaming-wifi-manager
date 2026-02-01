@@ -136,15 +136,34 @@ void RoamingWiFiManager::loadScanSettings() {
     autoRescanSkipNotDetected = wifiPrefs.getBool("autoRescSkipNd", true);
 
     // Wait interval between consecutive scans during auto-rescan.
-    // Default to 0.0 for backward compatibility (no delay).
+    // Default to 10.0 sec.
     if (!wifiPrefs.isKey("autoRescWaSecF")) {
-        wifiPrefs.putFloat("autoRescWaSecF", 0.0f);
+        wifiPrefs.putFloat("autoRescWaSecF", 10.0f);
     }
-    float vWaitSec = wifiPrefs.getFloat("autoRescWaSecF", 0.0f);
+    float vWaitSec = wifiPrefs.getFloat("autoRescWaSecF", 10.0f);
     if (!(vWaitSec >= 0.0f && vWaitSec <= 10.0f)) {
-        vWaitSec = 0.0f;
+        vWaitSec = 10.0f;
     }
     autoRescanWaitIntervalSec = vWaitSec;
+
+    // Scan time settings for DFS and non-DFS channels
+    if (!wifiPrefs.isKey("scanTimeNonDfs")) {
+        wifiPrefs.putUInt("scanTimeNonDfs", 50);
+    }
+    uint32_t vNonDfs = wifiPrefs.getUInt("scanTimeNonDfs", 50);
+    if (!(vNonDfs >= 10 && vNonDfs <= 1000)) {
+        vNonDfs = 50;
+    }
+    scanTimeNonDfsMs = vNonDfs;
+
+    if (!wifiPrefs.isKey("scanTimeDfs")) {
+        wifiPrefs.putUInt("scanTimeDfs", 200);
+    }
+    uint32_t vDfs = wifiPrefs.getUInt("scanTimeDfs", 200);
+    if (!(vDfs >= 10 && vDfs <= 1000)) {
+        vDfs = 200;
+    }
+    scanTimeDfsMs = vDfs;
 }
 
 void RoamingWiFiManager::loadStatusSettings() {
@@ -1174,6 +1193,48 @@ void RoamingWiFiManager::setupSettingsEndpoints() {
         request->send(200, "application/json", result);
     });
 
+    server.on("/wifi/scanTimes", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        if (!checkHttpAuth(request)) return;
+        request->send(200, "application/json", "{\"message\":\"Scan times updated\"}");
+    }, nullptr, [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+        if (!checkHttpAuth(request)) return;
+        String body = "";
+        for (size_t i = 0; i < len; i++) {
+            body += (char)data[i];
+        }
+        JsonDocument doc;
+        if (!tryParseJson(body, doc, request)) {
+            return;
+        }
+
+        uint32_t nonDfsMs = doc["scanTimeNonDfsMs"] | scanTimeNonDfsMs;
+        uint32_t dfsMs = doc["scanTimeDfsMs"] | scanTimeDfsMs;
+        
+        if (!(nonDfsMs >= 10 && nonDfsMs <= 1000)) {
+            sendJsonError(request, 400, "scanTimeNonDfsMs out of range (10..1000)");
+            return;
+        }
+        if (!(dfsMs >= 10 && dfsMs <= 1000)) {
+            sendJsonError(request, 400, "scanTimeDfsMs out of range (10..1000)");
+            return;
+        }
+
+        scanTimeNonDfsMs = nonDfsMs;
+        scanTimeDfsMs = dfsMs;
+        wifiPrefs.putUInt("scanTimeNonDfs", scanTimeNonDfsMs);
+        wifiPrefs.putUInt("scanTimeDfs", scanTimeDfsMs);
+
+        DBG_PRINTF_L(2,"WiFi: Scan times updated - Non-DFS: %u ms, DFS: %u ms\n", scanTimeNonDfsMs, scanTimeDfsMs);
+
+        JsonDocument resp;
+        resp["message"] = "Scan times updated";
+        resp["scanTimeNonDfsMs"] = scanTimeNonDfsMs;
+        resp["scanTimeDfsMs"] = scanTimeDfsMs;
+        String result;
+        serializeJson(resp, result);
+        request->send(200, "application/json", result);
+    });
+
     server.on("/wifi/statusRefreshInterval", HTTP_POST, [this](AsyncWebServerRequest *request) {
         if (!checkHttpAuth(request)) return;
         request->send(200, "application/json", "{\"message\":\"Status refresh interval updated\"}");
@@ -1247,7 +1308,7 @@ void RoamingWiFiManager::setupSettingsEndpoints() {
         autoRescanKnownOnlySetting = true;
         autoRescanTestChannels = true;
         autoRescanSkipNotDetected = true;
-        autoRescanWaitIntervalSec = 0.0f;
+        autoRescanWaitIntervalSec = 10.0f;
         statusRefreshIntervalSec = 0.5f;
         statusAutoRefreshEnabled = true;
         autoReconnectEnabled = true;
@@ -1256,6 +1317,8 @@ void RoamingWiFiManager::setupSettingsEndpoints() {
         autoRoamDeltaRssiDbm = 10.0f;
         autoRoamSameSsidOnly = true;
         bssidAliasesUrl = "";
+        scanTimeNonDfsMs = 50;
+        scanTimeDfsMs = 200;
 
         // Persist defaults to NVS
         wifiPrefs.putBool("autoFullEn", autoFullScanEnabled);
@@ -1275,6 +1338,8 @@ void RoamingWiFiManager::setupSettingsEndpoints() {
         wifiPrefs.putFloat("roamDeltaDbmF", autoRoamDeltaRssiDbm);
         wifiPrefs.putBool("roamSameSsid", autoRoamSameSsidOnly);
         wifiPrefs.putInt("debugLevel", debugLevel);
+        wifiPrefs.putUInt("scanTimeNonDfs", scanTimeNonDfsMs);
+        wifiPrefs.putUInt("scanTimeDfs", scanTimeDfsMs);
 
         // Reset any in-progress scan/rescan sequences
         autoRescanActive = false;
@@ -1453,6 +1518,10 @@ void RoamingWiFiManager::setupSettingsEndpoints() {
         doc["debugLevel"] = debugLevel;
         doc["bssidAliasesUrl"] = bssidAliasesUrl;
         
+        // Scan time settings
+        doc["scanTimeNonDfsMs"] = scanTimeNonDfsMs;
+        doc["scanTimeDfsMs"] = scanTimeDfsMs;
+        
         String result;
         serializeJson(doc, result);
         request->send(200, "application/json", result);
@@ -1589,6 +1658,12 @@ void RoamingWiFiManager::scanNetworksFullAsync() {
     }
 }
 
+bool RoamingWiFiManager::isDfsChannel(uint8_t channel) {
+    // DFS channels in 5GHz band: 52-64, 100-144
+    // Non-DFS 5GHz channels: 36, 40, 44, 48, 149, 153, 157, 161, 165, 169, 173, 177
+    return (channel >= 52 && channel <= 64) || (channel >= 100 && channel <= 144);
+}
+
 void RoamingWiFiManager::scanNetworkAsync(uint8_t channel, const uint8_t* bssid) {
     if (scanInProgress) {
         DBG_PRINTLN_L(2,"WiFi: Scan already in progress; cannot start another.");
@@ -1597,9 +1672,11 @@ void RoamingWiFiManager::scanNetworkAsync(uint8_t channel, const uint8_t* bssid)
 
     scanInProgress = true;
 
+    // Select scan time based on whether channel is DFS or not
+    uint32_t scanTimeMs = isDfsChannel(channel) ? scanTimeDfsMs : scanTimeNonDfsMs;
+
     // Scan one channel only, a specific BSSID (may be null).
-    // max_ms_per_chan kept short; we just want a quick refresh.
-    WiFi.scanNetworks(true, true, false, 300, channel, nullptr, bssid);
+    WiFi.scanNetworks(true, true, false, scanTimeMs, channel, nullptr, bssid);
     LED(25, 0, 50); // magenta: scan in progress
 }
 
@@ -1629,11 +1706,13 @@ bool RoamingWiFiManager::startAutoRescanNext(bool knownOnly) {
     }
 
     // Check if we need to wait before starting the next scan
-    if (autoRescanWaitIntervalSec > 0.0f && lastAutoRescanSingleScanTime > 0) {
-        unsigned long waitMs = (unsigned long)(autoRescanWaitIntervalSec * 1000.0f);
+    if (autoRescanKnownIntervalSec > 0.0f && lastAutoRescanSingleScanTime > 0) {
+        unsigned long waitMs = (unsigned long)(autoRescanKnownIntervalSec * 1000.0f);
         unsigned long elapsedMs = millis() - lastAutoRescanSingleScanTime;
         if (elapsedMs < waitMs) {
             // Not enough time has passed, don't start next scan yet
+            DBG_PRINTF_L(4,"WiFi: Auto-rescan waiting %.2f sec before next scan\n",
+                (double)((waitMs - elapsedMs) / 1000.0f));
             return false;
         }
     }
@@ -1887,7 +1966,7 @@ bool RoamingWiFiManager::handleAutomaticScanning() {
     }
 
     if (autoRescanKnownEnabled) {
-        long intervalMs = autoRescanKnownIntervalSec * 1000;
+        long intervalMs = (autoRescanActive?autoRescanKnownIntervalSec:autoRescanWaitIntervalSec) * 1000;
         if (lastAutoRescanTime == 0 || (millis() - lastAutoRescanTime >= intervalMs)) {
             lastAutoRescanTime = millis();
             // If we have nothing yet, seed with a full scan.

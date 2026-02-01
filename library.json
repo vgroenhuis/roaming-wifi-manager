@@ -1,6 +1,6 @@
 {
   "name": "roaming-wifi-manager",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Wifi roaming manager aimed for mesh wifi networks such as at universities.",
   "keywords": "wifi, mesh, esp32, roaming",
   "repository":

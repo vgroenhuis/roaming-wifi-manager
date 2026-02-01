@@ -107,7 +107,7 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
             </div>
 
             <div class="settings-row">
-                <span class="settings-label">Wait between scans:</span>
+                <span class="settings-label">Wait between series of scans:</span>
                 <input class="settings-number" type="number" id="autoRescanWaitInterval" min="0" max="10" step="0.01" value="0" onchange="updateAutoScanSetting()">
                 <span>sec</span>
             </div>
@@ -145,6 +145,18 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
                     <option value="4">4</option>
                     <option value="5">5 (Max)</option>
                 </select>
+            </div>
+
+            <div class="settings-row">
+                <span class="settings-label">Scan time for non-DFS channels:</span>
+                <input class="settings-number" type="number" id="scanTimeNonDfs" min="10" max="1000" step="10" value="50" onchange="updateScanTimes()">
+                <span>ms</span>
+            </div>
+
+            <div class="settings-row">
+                <span class="settings-label">Scan time for DFS channels (52-64, 100-144):</span>
+                <input class="settings-number" type="number" id="scanTimeDfs" min="10" max="1000" step="10" value="200" onchange="updateScanTimes()">
+                <span>ms</span>
             </div>
         </div>
 
@@ -371,6 +383,50 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
             })
             .catch(() => {
                 setDebugLevelFromServer(level);
+            });
+        }
+
+        function setScanTimesFromServer(nonDfsMs, dfsMs) {
+            const nonDfsInput = document.getElementById('scanTimeNonDfs');
+            const dfsInput = document.getElementById('scanTimeDfs');
+            if (nonDfsInput) {
+                const val = Number(nonDfsMs);
+                nonDfsInput.value = (Number.isFinite(val) && val >= 10 && val <= 1000) ? String(val) : '50';
+            }
+            if (dfsInput) {
+                const val = Number(dfsMs);
+                dfsInput.value = (Number.isFinite(val) && val >= 10 && val <= 1000) ? String(val) : '200';
+            }
+        }
+
+        function updateScanTimes() {
+            const nonDfsInput = document.getElementById('scanTimeNonDfs');
+            const dfsInput = document.getElementById('scanTimeDfs');
+            if (!nonDfsInput || !dfsInput) return;
+
+            let nonDfsMs = Number(nonDfsInput.value);
+            let dfsMs = Number(dfsInput.value);
+            
+            if (!Number.isFinite(nonDfsMs) || nonDfsMs < 10 || nonDfsMs > 1000) nonDfsMs = 50;
+            if (!Number.isFinite(dfsMs) || dfsMs < 10 || dfsMs > 1000) dfsMs = 200;
+            
+            nonDfsInput.value = String(nonDfsMs);
+            dfsInput.value = String(dfsMs);
+
+            authenticatedFetch('/wifi/scanTimes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    scanTimeNonDfsMs: nonDfsMs,
+                    scanTimeDfsMs: dfsMs
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                setScanTimesFromServer(data.scanTimeNonDfsMs ?? nonDfsMs, data.scanTimeDfsMs ?? dfsMs);
+            })
+            .catch(() => {
+                setScanTimesFromServer(nonDfsMs, dfsMs);
             });
         }
 
@@ -1319,7 +1375,7 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
                     setAutoRescanKnownOnlyFromServer(rescanKnownOnly);
                     setAutoRescanSkipNotDetectedFromServer(rescanSkipNotDetected);
                     setAutoRescanTestChannelsFromServer(rescanTestChannels);
-                    setAutoRescanWaitIntervalFromServer(data.autoRescanWaitIntervalSec ?? 0);
+                    setAutoRescanWaitIntervalFromServer(data.autoRescanWaitIntervalSec ?? 10);
                     setStatusAutoRefreshIntervalFromServer(data.statusRefreshIntervalSec ?? 0.5);
                     setStatusAutoRefreshEnabledFromServer(data.statusAutoRefreshEnabled ?? true);
                     setAutoReconnectFromServer(data.autoReconnectEnabled ?? true, data.autoReconnectIntervalSec ?? 5);
@@ -1331,6 +1387,8 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
                     );
 
                     setDebugLevelFromServer(data.debugLevel ?? 0);
+
+                    setScanTimesFromServer(data.scanTimeNonDfsMs ?? 50, data.scanTimeDfsMs ?? 200);
 
                     setBssidAliasesUrlFromServer(data.bssidAliasesUrl);
                 });
@@ -1346,12 +1404,13 @@ const char WIFI_HTML[] PROGMEM = R"MyString(<!DOCTYPE html>
                     setAutoRescanKnownOnlyFromServer(data.autoRescanKnownOnly ?? true);
                     setAutoRescanSkipNotDetectedFromServer(data.autoRescanSkipNotDetected ?? true);
                     setAutoRescanTestChannelsFromServer(data.autoRescanTestChannels ?? true);
-                    setAutoRescanWaitIntervalFromServer(data.autoRescanWaitIntervalSec ?? 0);
+                    setAutoRescanWaitIntervalFromServer(data.autoRescanWaitIntervalSec ?? 10);
                     setStatusAutoRefreshIntervalFromServer(data.statusRefreshIntervalSec ?? 0.5);
                     setStatusAutoRefreshEnabledFromServer(data.statusAutoRefreshEnabled ?? true);
                     setAutoReconnectFromServer(data.autoReconnectEnabled ?? true, data.autoReconnectIntervalSec ?? 5);
                     setAutoRoamFromServer(data.autoRoamEnabled ?? true, data.autoRoamDeltaRssiDbm ?? 10, data.autoRoamSameSsidOnly ?? true);
                     setDebugLevelFromServer(data.debugLevel ?? 0);
+                    setScanTimesFromServer(data.scanTimeNonDfsMs ?? 50, data.scanTimeDfsMs ?? 200);
                     setBssidAliasesUrlFromServer(data.bssidAliasesUrl ?? '');
                     // Optionally refresh status/networks to reflect any changes
                     refreshStatusAndNetworks();

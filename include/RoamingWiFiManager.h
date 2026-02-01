@@ -73,6 +73,7 @@ class RoamingWiFiManager {
 
         // Static helper methods
         static bool parseBssid(const String& bssidStr, uint8_t bssid[6]);
+        static bool isDfsChannel(uint8_t channel); // Check if a channel is a DFS channel
 
         // Helper methods for splitting large functions
         void loadScanSettings();
@@ -130,6 +131,10 @@ class RoamingWiFiManager {
         float autoRescanKnownIntervalSec = 1.0f;
         bool autoRescanKnownOnlySetting = true; // if true, automatic rescan targets known networks only; otherwise all existing networks
 
+        // Scan time settings (persisted)
+        uint32_t scanTimeNonDfsMs = 50; // max scan time per channel for non-DFS channels (ms)
+        uint32_t scanTimeDfsMs = 200;    // max scan time per channel for DFS channels (ms)
+
         bool scanInProgress = false;
         ScanPurpose scanPurpose = ScanPurpose::None;
         bool autoRescanActive = false;
@@ -140,7 +145,7 @@ class RoamingWiFiManager {
         bool autoRescanKnownOnly = false; // true if the current rescan sweep only targets known networks; for now managed by startAutoRescanNext(knownOnly)
         bool autoRescanTestChannels = true; // if true, after full auto-rescan sweep, also test one channel
         bool autoRescanSkipNotDetected = true; // if true, skip non-detected networks during rescan to avoid wasting resources
-        float autoRescanWaitIntervalSec = 0.0f; // wait time between consecutive scans during auto-rescan (seconds), persisted
+        float autoRescanWaitIntervalSec = 10.0f; // wait time between consecutive series of scans during auto-rescan (seconds), persisted
         unsigned long lastAutoRescanSingleScanTime = 0; // timestamp when last single network scan completed (ms)
         int autoRescanTestChannelIndex = -1; // last channel tested if autoRescanTestChannels is true
         std::vector<int> autoRescanTestChannelList = {36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144, 149, 153, 157, 161, 165, 169, 173, 177}; // list of channels to test if autoRescanTestChannels is true

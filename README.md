@@ -19,12 +19,12 @@ An extensive web interface is available to control scanning and auto-reconnectin
 - orange flashing: connecting to best network
 - blue: processing scanned networks
 - green: connected
-- red: not connected
+- magenta: re-scanning channel
+- red: disconnected
 
 # supported (recommended) boards
 - ESP32-C5-DevKitC-1 (Espressif)
 - ESP32-C5-WIFI6-KIT-N16R8 (WaveShare)
 
 ## todo
-- test in university building with many access points
 - control which channels are (re-)scanned, which are active and which passive
