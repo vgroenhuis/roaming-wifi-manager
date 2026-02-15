@@ -863,9 +863,11 @@ void RoamingWiFiManager::connectToTargetNetwork(const String& ssid, const String
         DBG_PRINTF_L(0,"IP Address: %s\n", WiFi.localIP().toString().c_str());
         DBG_PRINTF_L(1,"Station MAC: %s\n", WiFi.macAddress().c_str());
         DBG_PRINTF_L(1,"AP BSSID: %s  Channel: %d  RSSI: %d dBm\n", WiFi.BSSIDstr().c_str(), WiFi.channel(), WiFi.RSSI());
+        // Set LED to green when connected
         LED(0, 10, 0); // Green for connected
     } else {
         DBG_PRINTLN_L(1,"WiFi: Connection failed!");
+        // Keep LED red for failed connection
         LED(10, 0, 0); // Red for connection failed
     }
     lastConnectAttemptTime = millis();
@@ -1748,12 +1750,23 @@ bool RoamingWiFiManager::startAutoRescanNext(bool knownOnly) {
         }
         
         // Skip if we're skipping non-detected networks and this one is not detected
+        // BUT: never skip the currently connected network
         if (autoRescanSkipNotDetected && !candidate.detected) {
-            DBG_PRINTF_L(3,"WiFi: Auto-rescan skipping non-detected network %s (BSSID: %s)\n", 
-                candidate.ssid.c_str(), candidate.bssid.c_str());
-            scannedNetworkList[autoRescanIndex].scanned = false;
-            autoRescanIndex++;
-            continue;
+            // Check if this is the currently connected network
+            const bool isConnected = (WiFi.status() == WL_CONNECTED);
+            const String currentBssid = isConnected ? WiFi.BSSIDstr() : "";
+            const bool isCurrentlyConnected = isConnected && candidate.bssid.equalsIgnoreCase(currentBssid);
+            
+            if (!isCurrentlyConnected) {
+                DBG_PRINTF_L(3,"WiFi: Auto-rescan skipping non-detected network %s (BSSID: %s)\n", 
+                    candidate.ssid.c_str(), candidate.bssid.c_str());
+                scannedNetworkList[autoRescanIndex].scanned = false;
+                autoRescanIndex++;
+                continue;
+            } else {
+                DBG_PRINTF_L(3,"WiFi: Auto-rescan keeping currently connected network %s (BSSID: %s) despite not detected\n", 
+                    candidate.ssid.c_str(), candidate.bssid.c_str());
+            }
         }
         
         // This entry is eligible for scanning

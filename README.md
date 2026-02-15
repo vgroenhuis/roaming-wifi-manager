@@ -25,6 +25,3 @@ An extensive web interface is available to control scanning and auto-reconnectin
 # supported (recommended) boards
 - ESP32-C5-DevKitC-1 (Espressif)
 - ESP32-C5-WIFI6-KIT-N16R8 (WaveShare)
-
-## todo
-- control which channels are (re-)scanned, which are active and which passive
